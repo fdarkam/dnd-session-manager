@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build
+client/dist/
+client/dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+server/.env
+
+# SQLite database files
+server/*.db
+server/*.db-shm
+server/*.db-wal
+
+# Uploads (fichiers utilisateurs)
+server/uploads/
+
+# Errors
+server/error.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.sw?
