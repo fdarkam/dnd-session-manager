@@ -151,9 +151,12 @@ const newCols = [
   ['characters', 'capacities', "TEXT DEFAULT '[]'"],
   ['characters', 'equipment', "TEXT DEFAULT '[]'"],
   ['characters', 'history', "TEXT DEFAULT ''"],
+  ['maps', 'fog_enabled', 'INTEGER DEFAULT 0'],
 ];
 for (const [table, col, def] of newCols) {
-  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch {}
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) {
+    if (!e.message.includes('duplicate column')) console.error('Migration error:', e.message);
+  }
 }
 
 export default db;

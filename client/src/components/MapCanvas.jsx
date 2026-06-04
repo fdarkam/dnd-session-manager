@@ -21,6 +21,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [image, setImage] = useState(null);
+  const [fogEnabled, setFogEnabled] = useState(false);
 
   // New token form
   const [newTokenName, setNewTokenName] = useState('');
@@ -40,25 +41,43 @@ export default function MapCanvas({ sessionId, isDM }) {
         setPaths(prev => [...prev, data.path]);
       }
     };
+    const onMapChanged = (data) => {
+      if (data.map) {
+        const incoming = data.map;
+        setMaps(prev => prev.map(m => ({ ...m, is_active: m.id === incoming.id ? 1 : 0 })));
+        setActiveMap(incoming);
+        setFogEnabled(!!incoming.fog_enabled);
+      }
+    };
+    const onFogUpdate = (data) => {
+      if (data.mapId === activeMap?.id) {
+        setFogEnabled(!!data.enabled);
+      }
+    };
     socket.on('map-token-update', onTokenUpdate);
     socket.on('map-drawing-update', onDrawing);
+    socket.on('map-changed', onMapChanged);
+    socket.on('map-fog-update', onFogUpdate);
     return () => {
       socket.off('map-token-update', onTokenUpdate);
       socket.off('map-drawing-update', onDrawing);
+      socket.off('map-changed', onMapChanged);
+      socket.off('map-fog-update', onFogUpdate);
     };
   }, [socket, activeMap]);
 
   useEffect(() => {
     if (activeMap) {
       const img = new Image();
-      img.src = `http://localhost:3001${activeMap.image_path}`;
+      img.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
       img.onload = () => setImage(img);
       setTokens(typeof activeMap.tokens === 'string' ? JSON.parse(activeMap.tokens) : (activeMap.tokens || []));
       setPaths([]);
+      setFogEnabled(!!activeMap.fog_enabled);
     }
   }, [activeMap]);
 
-  useEffect(() => { draw(); }, [image, tokens, paths, currentPath, panOffset, zoom]);
+  useEffect(() => { draw(); }, [image, tokens, paths, currentPath, panOffset, zoom, fogEnabled, isDM]);
 
   const fetchMaps = async () => {
     const res = await fetch(`${API}/maps/session/${sessionId}`, {
@@ -87,6 +106,13 @@ export default function MapCanvas({ sessionId, isDM }) {
       body: formData
     });
     if (res.ok) fetchMaps();
+  };
+
+  const toggleFog = () => {
+    if (!isDM || !activeMap) return;
+    const next = !fogEnabled;
+    setFogEnabled(next);
+    if (socket) socket.emit('map-fog-toggle', { sessionId, mapId: activeMap.id, enabled: next });
   };
 
   const draw = useCallback(() => {
@@ -152,16 +178,45 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.lineWidth = 2;
       ctx.stroke();
 
+      // Initials inside circle
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 11px Inter';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const label = t.name.length > 3 ? t.name.substring(0, 3) : t.name;
-      ctx.fillText(label, t.x, t.y);
+      ctx.fillText(t.name.substring(0, 2).toUpperCase(), t.x, t.y);
+
+      // Full name below circle
+      ctx.font = 'bold 10px Inter';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(t.name, t.x, t.y + size + 3);
+      ctx.fillText(t.name, t.x, t.y + size + 3);
     });
 
     ctx.restore();
-  }, [image, tokens, paths, currentPath, panOffset, zoom]);
+
+    // Fog of war — drawn outside transform so it always covers the full canvas
+    if (fogEnabled) {
+      if (isDM) {
+        // DM sees a semi-transparent overlay to know fog is active
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      } else {
+        // Players see complete blackout
+        ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+      }
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (isDM) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = 'bold 13px Inter';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('🌫️ Brouillard actif — les joueurs ne voient rien', canvas.width / 2, 8);
+      }
+    }
+  }, [image, tokens, paths, currentPath, panOffset, zoom, fogEnabled, isDM]);
 
   const getCanvasPos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -175,7 +230,6 @@ export default function MapCanvas({ sessionId, isDM }) {
     const pos = getCanvasPos(e);
 
     if (tool === 'move' || e.button === 1) {
-      // Check if clicking on a token
       if (isDM) {
         const clicked = tokens.find(t => {
           const dx = t.x - pos.x;
@@ -297,17 +351,34 @@ export default function MapCanvas({ sessionId, isDM }) {
         )}
 
         {isDM && (
-          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', marginLeft: 'auto' }}>
-            📤 Upload Map
-            <input type="file" accept="image/*" onChange={uploadMap} style={{ display: 'none' }} />
-          </label>
+          <>
+            <button
+              className={`btn btn-sm ${fogEnabled ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={toggleFog}
+              title={fogEnabled ? 'Désactiver le brouillard' : 'Activer le brouillard'}
+              style={{ marginLeft: 'var(--space-sm)' }}
+            >
+              {fogEnabled ? '🌫️ Fog ON' : '🌤️ Fog OFF'}
+            </button>
+            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', marginLeft: 'auto' }}>
+              📤 Upload Map
+              <input type="file" accept="image/*" onChange={uploadMap} style={{ display: 'none' }} />
+            </label>
+          </>
         )}
 
         {/* Map Selector */}
         {maps.length > 1 && (
           <select
             value={activeMap?.id || ''}
-            onChange={(e) => setActiveMap(maps.find(m => m.id === e.target.value))}
+            onChange={(e) => {
+              const selected = maps.find(m => m.id === e.target.value);
+              if (!selected) return;
+              setActiveMap(selected);
+              if (isDM && socket) {
+                socket.emit('map-change', { sessionId, mapId: selected.id });
+              }
+            }}
             style={{ padding: '4px 8px', fontSize: '0.8rem' }}
           >
             {maps.map(m => (

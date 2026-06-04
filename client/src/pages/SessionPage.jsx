@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
-import { useSocket } from '../contexts/SocketContext';
+import { useSocket, useSocketContext } from '../contexts/SocketContext';
 import CharacterSheet from '../components/CharacterSheet';
 import DiceRoller from '../components/DiceRoller';
 import ChatPanel from '../components/ChatPanel';
@@ -12,6 +12,7 @@ import Notifications from '../components/Notifications';
 export default function SessionPage({ sessionId, onBack }) {
   const { user, token, logout } = useAuth();
   const socket = useSocket();
+  const { currentSessionRef } = useSocketContext();
   const [session, setSession] = useState(null);
   const [activeTab, setActiveTab] = useState('characters');
   const [loading, setLoading] = useState(true);
@@ -22,8 +23,12 @@ export default function SessionPage({ sessionId, onBack }) {
 
   useEffect(() => {
     if (socket && sessionId) {
+      currentSessionRef.current = sessionId;
       socket.emit('join-session', sessionId);
-      return () => { socket.emit('leave-session', sessionId); };
+      return () => {
+        currentSessionRef.current = null;
+        socket.emit('leave-session', sessionId);
+      };
     }
   }, [socket, sessionId]);
 
@@ -135,23 +140,23 @@ export default function SessionPage({ sessionId, onBack }) {
           </div>
         </div>
 
-        {/* Tab Content */}
+        {/* Tab Content — all tabs stay mounted to preserve state and socket listeners */}
         <div className="session-main">
-          {activeTab === 'characters' && (
+          <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
             <CharacterSheet sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'dice' && (
+          </div>
+          <div style={{ display: activeTab === 'dice' ? 'block' : 'none', height: '100%' }}>
             <DiceRoller sessionId={sessionId} />
-          )}
-          {activeTab === 'map' && (
+          </div>
+          <div style={{ display: activeTab === 'map' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
             <MapCanvas sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'combat' && (
+          </div>
+          <div style={{ display: activeTab === 'combat' ? 'block' : 'none', height: '100%' }}>
             <CombatTracker sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'logs' && (
+          </div>
+          <div style={{ display: activeTab === 'logs' ? 'block' : 'none', height: '100%' }}>
             <ActionLog sessionId={sessionId} />
-          )}
+          </div>
         </div>
 
         {/* Chat Sidebar */}

@@ -1,8 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dnd-secret-key-change-in-production';
+import { JWT_SECRET } from '../middleware/auth.js';
 
 export function setupSocket(io) {
   // Auth middleware for sockets
@@ -18,14 +17,24 @@ export function setupSocket(io) {
     }
   });
 
+  // Helper: check session membership from socket
+  function isMember(sessionId, userId) {
+    return !!db.prepare('SELECT id FROM session_members WHERE session_id = ? AND user_id = ?')
+      .get(sessionId, userId);
+  }
+
+  function isDM(sessionId, userId) {
+    const m = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
+      .get(sessionId, userId);
+    return m?.role === 'dm';
+  }
+
   io.on('connection', (socket) => {
     console.log(`✅ ${socket.user.username} connected`);
 
     // --- Room management ---
     socket.on('join-session', (sessionId) => {
-      const member = db.prepare('SELECT id FROM session_members WHERE session_id = ? AND user_id = ?')
-        .get(sessionId, socket.user.id);
-      if (!member) {
+      if (!isMember(sessionId, socket.user.id)) {
         socket.emit('error', { message: 'Accès refusé à cette session' });
         return;
       }
@@ -48,6 +57,7 @@ export function setupSocket(io) {
     // --- Dice rolling ---
     socket.on('dice-roll', (data) => {
       const { sessionId, expression, results, total } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
       const roll = {
         id: uuidv4(),
         session_id: sessionId,
@@ -80,6 +90,7 @@ export function setupSocket(io) {
     // --- Chat ---
     socket.on('chat-message', (data) => {
       const { sessionId, content } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
       const msg = {
         id: uuidv4(),
         session_id: sessionId,
@@ -103,17 +114,19 @@ export function setupSocket(io) {
     // --- Map updates ---
     socket.on('map-token-move', (data) => {
       const { sessionId, mapId, tokens } = data;
-      // Only broadcast - persistence is handled by client debounced HTTP save
+      if (!isMember(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-token-update', { mapId, tokens });
     });
 
     socket.on('map-drawing', (data) => {
       const { sessionId } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-drawing-update', data);
     });
 
     socket.on('map-change', (data) => {
       const { sessionId, mapId, tokens } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
       let mapData = null;
       try {
         const map = db.prepare('SELECT * FROM maps WHERE id = ?').get(mapId);
@@ -137,6 +150,7 @@ export function setupSocket(io) {
     // --- Combat ---
     socket.on('combat-update', (data) => {
       const { sessionId, encounter } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
       try {
         if (encounter) {
           db.prepare('UPDATE combat_encounters SET entities = ?, current_turn = ?, round = ? WHERE id = ?')
@@ -150,6 +164,7 @@ export function setupSocket(io) {
 
     socket.on('combat-next-turn', (data) => {
       const { sessionId, encounter } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
       io.to(sessionId).emit('combat-turn-changed', encounter);
 
       // Notification for active entity
@@ -165,6 +180,17 @@ export function setupSocket(io) {
           });
         }
       }
+    });
+
+    // --- Fog of war ---
+    socket.on('map-fog-toggle', (data) => {
+      const { sessionId, mapId, enabled } = data;
+      try {
+        db.prepare('UPDATE maps SET fog_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, mapId);
+      } catch (err) {
+        console.error('DB fog error:', err);
+      }
+      socket.to(sessionId).emit('map-fog-update', { mapId, enabled });
     });
 
     // --- Character live sync ---

@@ -4,7 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { PDFParse } from 'pdf-parse';
+import PDFParse from 'pdf-parse';
 import db from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -33,8 +33,13 @@ function getMemberRole(sessionId, userId) {
 }
 
 // ---- Parse PDF text into character data ----
-function parsePdfText(text) {
+// Strategy: try multiple patterns per field, use first match found.
+// Any unrecognised lines are preserved in notes so nothing is lost.
+function parsePdfText(rawText) {
+  // Normalize: collapse multiple spaces, keep line breaks
+  const text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
   const data = {
     name: '', race: '', class: '', level: 1,
     ac: 10, initiative: '+0', ba: '+0',
@@ -44,99 +49,150 @@ function parsePdfText(text) {
     inventory: [], skills: [], history: '', notes: ''
   };
 
-  // --- Name ---
-  for (const line of lines) {
-    const nameMatch = line.match(/(?:character\s*name|nom(?:\s*du\s*personnage)?)\s*[:\-]?\s*(.+)/i);
-    if (nameMatch) { data.name = nameMatch[1].trim(); break; }
+  // Generic key:value extractor — matches "Label : Value" or "Label - Value"
+  // Returns the first match for any of the provided label patterns
+  function extract(labelPatterns, valuePattern = '(.+)') {
+    for (const label of labelPatterns) {
+      const re = new RegExp(`(?:^|\\n)\\s*${label}\\s*[:\\-]\\s*${valuePattern}`, 'im');
+      const m = text.match(re);
+      if (m) return m[1].trim();
+    }
+    return null;
   }
-  if (!data.name && lines.length > 0) {
-    for (const line of lines.slice(0, 5)) {
-      if (line.length > 1 && line.length < 60 && !/^\d+$/.test(line) && !/^(INFORMATIONS|CARACTERISTIQUES|Statistiques)/i.test(line)) {
-        data.name = line; break;
+
+  function extractInt(labelPatterns, valuePattern = '(\\d+)') {
+    const val = extract(labelPatterns, valuePattern);
+    return val !== null ? (parseInt(val) || null) : null;
+  }
+
+  function extractSigned(labelPatterns) {
+    const val = extract(labelPatterns, '([+\\-]?\\d+)');
+    return val;
+  }
+
+  // --- Name ---
+  const nameVal = extract([
+    'Nom(?:\\s+du\\s+personnage)?',
+    'Character\\s*Name',
+    'Personnage',
+    'Name',
+    'Nom'
+  ]);
+  if (nameVal) {
+    data.name = nameVal;
+  } else {
+    // Fallback: first short non-header line (skip section titles in ALL_CAPS or known headers)
+    const SKIP = /^(INFORMATIONS?|CARACT[ÉE]RISTIQUES?|STATISTIQUES?|MATRICULE|EQUIPEMENTS?|APTITUDES?|CAPACIT[ÉE]S?|HISTOIRE|NOTES?|INVENTAIRE|COMP[ÉE]TENCES?)\b/i;
+    for (const line of lines.slice(0, 10)) {
+      if (line.length >= 2 && line.length <= 60 && !/^\d+$/.test(line) && !SKIP.test(line)) {
+        data.name = line;
+        break;
       }
     }
   }
 
-  // --- Nom: field ---
-  const nomMatch = text.match(/Nom\s*:\s*(.+)/i);
-  if (nomMatch) data.name = nomMatch[1].trim();
-
   // --- Class ---
-  const classMatch = text.match(/Classe\s*:\s*(.+)/i) || text.match(/Class[e]?\s*:\s*(.+)/i);
-  if (classMatch) data.class = classMatch[1].trim();
+  const classVal = extract(['Classe', 'Class', 'Métier', 'Metier', 'Profession']);
+  if (classVal) data.class = classVal;
 
-  // --- Race ---
-  const raceMatch = text.match(/Race\s*:\s*(.+)/i);
-  if (raceMatch) data.race = raceMatch[1].trim();
+  // --- Race / Espèce ---
+  const raceVal = extract(['Race', 'Esp[èe]ce', 'Origine', 'Espèce']);
+  if (raceVal) data.race = raceVal;
 
   // --- Level ---
-  const lvlMatch = text.match(/Niv(?:eau)?\s*:\s*(\d+)/i) || text.match(/Level\s*:\s*(\d+)/i);
-  if (lvlMatch) data.level = parseInt(lvlMatch[1]) || 1;
+  const lvlVal = extractInt(['Niv(?:eau)?', 'Level', 'Niveau', 'Lvl', 'Lv']);
+  if (lvlVal !== null) data.level = Math.max(1, Math.min(20, lvlVal));
 
-  // --- HP ---
-  const hpMatch = text.match(/HP\s*:\s*(\d+)\s*\/\s*(\d+)/i);
-  if (hpMatch) {
-    data.hp_current = parseInt(hpMatch[1]);
-    data.hp_max = parseInt(hpMatch[2]);
+  // --- HP: current/max ---
+  // Try "PV : 8/10", "HP : 8/10", or separate fields
+  const hpSplit = text.match(/(?:PV|HP|Points?\s*de\s*vie)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)/i);
+  if (hpSplit) {
+    data.hp_current = parseInt(hpSplit[1]);
+    data.hp_max = parseInt(hpSplit[2]);
+  } else {
+    const hpMax = extractInt(['PV\s*max(?:imum)?', 'HP\s*max(?:imum)?', 'Points?\s*de\s*vie\s*max(?:imum)?', 'PV', 'HP']);
+    if (hpMax !== null) { data.hp_current = hpMax; data.hp_max = hpMax; }
   }
 
-  // --- AC ---
-  const acMatch = text.match(/AC\s*:\s*(\d+)/i);
-  if (acMatch) data.ac = parseInt(acMatch[1]);
+  // --- AC / Armor Class / Défense ---
+  const acVal = extractInt(['CA', 'AC', 'Armure', 'Classe\s*d\'armure', 'D[ée]fense']);
+  if (acVal !== null) data.ac = acVal;
 
   // --- Initiative ---
-  const initMatch = text.match(/INITIATIVE\s*:\s*([+-]?\d+)/i);
-  if (initMatch) data.initiative = initMatch[1];
+  const initVal = extractSigned(['Initiative', 'INITIATIVE', 'Init']);
+  if (initVal) data.initiative = initVal.startsWith('+') || initVal.startsWith('-') ? initVal : `+${initVal}`;
 
-  // --- BA (Bonus d'Attaque) ---
-  const baMatch = text.match(/BA\s*:\s*([+-]?\d+)/i);
-  if (baMatch) data.ba = baMatch[1];
+  // --- BA / Attack bonus ---
+  const baVal = extractSigned(['BA', 'Bonus\s*(?:d\')?[Aa]ttaque', 'Attack\s*Bonus', 'BBA']);
+  if (baVal) data.ba = baVal.startsWith('+') || baVal.startsWith('-') ? baVal : `+${baVal}`;
 
-  // --- Stats (table format: Force  11  +0  12  +1) ---
-  const statPatterns = {
-    str: /Force\s+(\d+)/i,
-    con: /Constitution\s+(\d+)/i,
-    dex: /Dext[eé]rit[eé]\s+(\d+)/i,
-    intel: /Intelligence\s+(\d+)/i,
-    wis: /Perception\s+(\d+)/i,
-    cha: /Charisme\s+(\d+)/i
-  };
-  for (const [key, regex] of Object.entries(statPatterns)) {
-    const match = text.match(regex);
-    if (match) data[key] = Math.min(30, Math.max(1, parseInt(match[1])));
+  // --- Ability scores — multiple aliases per stat ---
+  const statDefs = [
+    { key: 'str', labels: ['FOR', 'Force', 'STR', 'Strength', 'Force\\s*\\(FOR\\)'] },
+    { key: 'dex', labels: ['DEX', 'Dext[eé]rit[eé]', 'Dexterity', 'Dex\\s*\\(DEX\\)'] },
+    { key: 'con', labels: ['CON', 'Constitution', 'CON\\s*\\(CON\\)'] },
+    { key: 'intel', labels: ['INT', 'Intelligence', 'INT\\s*\\(INT\\)'] },
+    { key: 'wis', labels: ['SAG', 'Sagesse', 'WIS', 'Wisdom', 'Perception(?:\\s*\\(SAG\\))?'] },
+    { key: 'cha', labels: ['CHA', 'Charisme', 'Charisma', 'CHA\\s*\\(CHA\\)'] },
+  ];
+  for (const { key, labels } of statDefs) {
+    const val = extractInt(labels, '(\\d+)');
+    if (val !== null) data[key] = Math.min(30, Math.max(1, val));
   }
 
-  // --- Aptitudes ---
-  const aptSection = text.match(/Aptitudes\n([\s\S]*?)(?=Capacit[eé]s|Capacities|$)/i);
-  if (aptSection) {
-    const aptLines = aptSection[1].split('\n').map(l => l.trim()).filter(l => l.length > 3);
-    data.abilities = aptLines.slice(0, 20);
+  // --- Section extractor: grab lines between two headers ---
+  function extractSection(startPatterns, endPatterns) {
+    const startRe = new RegExp(`(?:^|\\n)\\s*(${startPatterns.join('|')})\\s*(?:[:\\-]\\s*)?\\n`, 'im');
+    const endRe = endPatterns.length
+      ? new RegExp(`(?:^|\\n)\\s*(${endPatterns.join('|')})\\s*(?:[:\\-]\\s*)?\\n`, 'im')
+      : null;
+    const startM = text.match(startRe);
+    if (!startM) return [];
+    const after = text.slice(startM.index + startM[0].length);
+    const endM = endRe ? after.match(endRe) : null;
+    const block = endM ? after.slice(0, endM.index) : after.slice(0, 3000);
+    return block.split('\n').map(l => l.trim()).filter(l => l.length > 2).slice(0, 40);
   }
 
-  // --- Capacités ---
-  const capSection = text.match(/Capacit[eé]s\n([\s\S]*?)(?=EQUIPEMENTS|[ÉE]QUIPEMENT|$)/i);
-  if (capSection) {
-    const capLines = capSection[1].split('\n').map(l => l.trim()).filter(l => l.length > 3);
-    data.capacities = capLines.slice(0, 30);
-  }
+  // --- Abilities / Aptitudes ---
+  data.abilities = extractSection(
+    ['Aptitudes?', 'Capacit[eé]s? sp[eé]ciales?', 'Traits?', 'Abilities', 'Features?'],
+    ['Capacit[eé]s?', '[ÉE]quipements?', 'Inventaire', 'Histoire', 'Notes?', 'Comp[eé]tences?']
+  );
 
-  // --- Équipements ---
-  const eqSection = text.match(/[ÉE]QUIPEMENTS?\n([\s\S]*?)(?=LEXIQUE|HISTOIRE|$)/i);
-  if (eqSection) {
-    const eqLines = eqSection[1].split('\n').map(l => l.trim()).filter(l => l.length > 3);
-    data.equipment = eqLines.slice(0, 30);
-  }
+  // --- Capacities / Spells ---
+  data.capacities = extractSection(
+    ['Capacit[eé]s?', 'Sorts?', 'Pouvoirs?', 'Powers?', 'Spells?'],
+    ['[ÉE]quipements?', 'Inventaire', 'Histoire', 'Notes?']
+  );
 
-  // --- Histoire ---
-  const histSection = text.match(/(?:HISTOIRE\s*&\s*PERSONNALIT[EÉ]|Histoire)\n([\s\S]*?)(?=DERNIERS|$)/i);
-  if (histSection) {
-    data.history = histSection[1].trim().substring(0, 5000);
-  }
+  // --- Equipment ---
+  data.equipment = extractSection(
+    ['[ÉE]quipements?', 'Armes?\\s*(?:et\\s*armures?)?', 'Weapons?', 'Gear'],
+    ['Inventaire', 'Histoire', 'Notes?', 'LEXIQUE']
+  );
 
-  // --- Skills / Aptitudes ---
-  data.skills = data.abilities;
+  // --- Inventory ---
+  data.inventory = extractSection(
+    ['Inventaire', 'Inventory', 'Objets?', 'Items?'],
+    ['Histoire', 'Notes?', 'LEXIQUE']
+  );
 
-  // --- Store the full extracted text as notes ---
+  // --- Skills / Compétences ---
+  data.skills = extractSection(
+    ['Comp[eé]tences?', 'Skills?', 'Ma[iî]trises?'],
+    ['Aptitudes?', 'Capacit[eé]s?', 'Histoire', 'Notes?']
+  );
+  if (data.skills.length === 0) data.skills = data.abilities;
+
+  // --- History / Background ---
+  const histSection = extractSection(
+    ['Histoire(?:\\s*&\\s*Personnalit[eé])?', 'Background', 'Biographie', 'Description', 'Backstory'],
+    ['Notes?', 'LEXIQUE', 'DERNIERS']
+  );
+  data.history = histSection.join('\n').substring(0, 5000);
+
+  // --- Notes: store full text so nothing is lost ---
   data.notes = '--- Texte extrait du PDF ---\n' + text.substring(0, 5000);
 
   return data;
@@ -381,11 +437,11 @@ router.post('/import-pdf', authMiddleware, uploadPdf.single('pdf'), async (req, 
     const role = getMemberRole(session_id, req.user.id);
     if (role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut importer un personnage' });
 
-    // Extract text from PDF using pdf-parse v2 API
     const pdfBuffer = fs.readFileSync(req.file.path);
-    const parser = new PDFParse({ data: new Uint8Array(pdfBuffer) });
-    const pdfData = await parser.getText();
-    await parser.destroy();
+    // Delete uploaded file immediately — no need to keep it on disk
+    fs.unlinkSync(req.file.path);
+
+    const pdfData = await PDFParse(pdfBuffer);
     const extractedText = pdfData.text;
 
     if (!extractedText || extractedText.trim().length === 0) {
@@ -395,10 +451,7 @@ router.post('/import-pdf', authMiddleware, uploadPdf.single('pdf'), async (req, 
       });
     }
 
-    // Parse extracted text into character fields
     const parsed = parsePdfText(extractedText);
-
-    // Create character from parsed data
     const id = uuidv4();
     insertCharacter(id, session_id, req.user.id, parsed);
 
@@ -410,6 +463,8 @@ router.post('/import-pdf', authMiddleware, uploadPdf.single('pdf'), async (req, 
       message: 'PDF importé ! Vérifiez et ajustez les champs si nécessaire.'
     });
   } catch (err) {
+    // Clean up file on error if it still exists
+    if (req.file?.path) try { fs.unlinkSync(req.file.path); } catch {}
     console.error('PDF import error:', err);
     res.status(500).json({ error: 'Erreur lors de l\'import PDF: ' + err.message });
   }
