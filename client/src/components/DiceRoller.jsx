@@ -6,9 +6,9 @@ import { parseDice } from '../utils/dice';
 // ─── Sound configuration — placez vos fichiers dans client/public/sounds/ ────
 //     Laissez vide ('') pour utiliser le son procédural généré automatiquement.
 const SOUND_FILES = {
-  nat20: '/sounds/nat20.mp3',
-  nat1:  '/sounds/fart.mp3',
-  roll:  '/sounds/roll_dice.mp3',
+  nat20: '/sounds/success.mp3',
+  nat1: '/sounds/fart.mp3',
+  roll: '/sounds/roll_dice.mp3',
 };
 
 // ─── Web Audio fallback (si le fichier est absent ou vide) ───────────────────
@@ -49,7 +49,7 @@ export default function DiceRoller({ sessionId }) {
   const [history, setHistory] = useState([]);
   const [lastResult, setLastResult] = useState(null);
   const [rolling, setRolling] = useState(false);
-  const historyRef  = useRef(null);
+  const historyRef = useRef(null);
   const audioCtxRef = useRef(null);
 
   const getAudioCtx = () => {
@@ -61,14 +61,14 @@ export default function DiceRoller({ sessionId }) {
   const playDiceSound = (roll) => {
     try {
       const results = typeof roll.results === 'string' ? JSON.parse(roll.results) : roll.results;
-      const isD20   = /^1d20$/i.test((roll.expression || '').trim());
-      const key     = isD20 && results[0] === 20 ? 'nat20' : isD20 && results[0] === 1 ? 'nat1' : 'roll';
-      const src     = SOUND_FILES[key];
+      const isD20 = /^1d20$/i.test((roll.expression || '').trim());
+      const key = isD20 && results[0] === 20 ? 'nat20' : isD20 && results[0] === 1 ? 'nat1' : 'roll';
+      const src = SOUND_FILES[key];
       if (src) {
         // Tente le fichier audio — si absent/bloqué, bascule sur le son procédural
         const a = new Audio(src);
         a.volume = 0.75;
-        a.play().catch(() => { try { PROCEDURAL[key](getAudioCtx()); } catch {} });
+        a.play().catch(() => { try { PROCEDURAL[key](getAudioCtx()); } catch { } });
       } else {
         PROCEDURAL[key](getAudioCtx());
       }
