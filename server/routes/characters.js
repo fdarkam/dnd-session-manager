@@ -459,10 +459,22 @@ router.post('/import-pdf', authMiddleware, uploadPdf.single('pdf'), async (req, 
     if (role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut importer un personnage' });
 
     const pdfBuffer = fs.readFileSync(req.file.path);
-    // Delete uploaded file immediately — no need to keep it on disk
+    // Supprimer immédiatement le fichier uploadé — on n'a besoin que du buffer
     fs.unlinkSync(req.file.path);
 
-    const pdfData = await PDFParse(pdfBuffer);
+    // pdf-parse peut échouer silencieusement au premier appel (initialisation paresseuse).
+    // On retente une fois après un court délai si le premier appel lève une exception.
+    let pdfData;
+    try {
+      pdfData = await PDFParse(pdfBuffer);
+    } catch (firstErr) {
+      await new Promise(r => setTimeout(r, 150));
+      try {
+        pdfData = await PDFParse(pdfBuffer);
+      } catch (retryErr) {
+        throw retryErr;
+      }
+    }
     const extractedText = pdfData.text;
 
     if (!extractedText || extractedText.trim().length === 0) {

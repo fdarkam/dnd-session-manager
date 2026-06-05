@@ -485,14 +485,17 @@ select {
   display: grid;
   grid-template-columns: 1fr 360px;
   grid-template-rows: auto 1fr;
-  height: calc(100vh - 60px);
+  /* Hauteur = espace restant dans le flex parent de SessionPage (100vh - navbar) */
+  height: 100%;
+  min-height: 0;
   gap: 0;
 }
 .session-main {
   grid-column: 1;
   grid-row: 2;
-  overflow-y: auto;
-  padding: var(--space-md);
+  /* overflow: hidden pour que la map prenne toute la hauteur sans scroll de page */
+  overflow: hidden;
+  min-height: 0;
 }
 .session-sidebar {
   grid-column: 2;
