@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
 import { useSocket, useSocketContext } from '../contexts/SocketContext';
 import CharacterSheet from '../components/CharacterSheet';
-import DiceRoller from '../components/DiceRoller';
 import ChatPanel from '../components/ChatPanel';
-import CombatTracker from '../components/CombatTracker';
 import MapCanvas from '../components/MapCanvas';
 import ActionLog from '../components/ActionLog';
 import Notifications from '../components/Notifications';
+import QuestTracker from '../components/QuestTracker';
+import WikiPanel from '../components/WikiPanel';
 
 export default function SessionPage({ sessionId, onBack }) {
   const { user, token, logout } = useAuth();
@@ -68,9 +68,9 @@ export default function SessionPage({ sessionId, onBack }) {
 
   const tabs = [
     { id: 'characters', icon: '📜', label: 'Personnages' },
-    { id: 'dice', icon: '🎲', label: 'Dés' },
+    { id: 'quests', icon: '🎯', label: 'Quêtes' },
     { id: 'map', icon: '🗺️', label: 'Map' },
-    { id: 'combat', icon: '⚔️', label: 'Combat' },
+    { id: 'wiki', icon: '📖', label: 'Wiki' },
     { id: 'logs', icon: '📋', label: 'Logs' },
   ];
 
@@ -145,14 +145,14 @@ export default function SessionPage({ sessionId, onBack }) {
           <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
             <CharacterSheet sessionId={sessionId} isDM={isDM} />
           </div>
-          <div style={{ display: activeTab === 'dice' ? 'block' : 'none', height: '100%' }}>
-            <DiceRoller sessionId={sessionId} />
+          <div style={{ display: activeTab === 'quests' ? 'block' : 'none', height: '100%' }}>
+            <QuestTracker sessionId={sessionId} isDM={isDM} />
           </div>
           <div style={{ display: activeTab === 'map' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
             <MapCanvas sessionId={sessionId} isDM={isDM} />
           </div>
-          <div style={{ display: activeTab === 'combat' ? 'block' : 'none', height: '100%' }}>
-            <CombatTracker sessionId={sessionId} isDM={isDM} />
+          <div style={{ display: activeTab === 'wiki' ? 'flex' : 'none', height: '100%' }}>
+            <WikiPanel sessionId={sessionId} isDM={isDM} />
           </div>
           <div style={{ display: activeTab === 'logs' ? 'block' : 'none', height: '100%' }}>
             <ActionLog sessionId={sessionId} />

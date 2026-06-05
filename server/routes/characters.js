@@ -4,7 +4,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import PDFParse from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const PDFParse = require('pdf-parse');
 import db from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -63,6 +65,17 @@ function parsePdfText(rawText) {
   function extractInt(labelPatterns, valuePattern = '(\\d+)') {
     const val = extract(labelPatterns, valuePattern);
     return val !== null ? (parseInt(val) || null) : null;
+  }
+
+  // Handles table format with no separator: "Force14+2", "Dextérité17+3"
+  // Uses [^\S\n] to prevent matching across lines (avoids picking familiar stats like "Str\n4")
+  function extractStatNoSep(labelPatterns) {
+    for (const label of labelPatterns) {
+      const re = new RegExp(`(?:^|\\n)[^\\S\\n]*${label}[^\\S\\n]*([1-9]\\d?)(?:[+\\-]\\d+|[^\\S\\n]|$)`, 'im');
+      const m = text.match(re);
+      if (m) return parseInt(m[1]);
+    }
+    return null;
   }
 
   function extractSigned(labelPatterns) {
@@ -136,7 +149,8 @@ function parsePdfText(rawText) {
     { key: 'cha', labels: ['CHA', 'Charisme', 'Charisma', 'CHA\\s*\\(CHA\\)'] },
   ];
   for (const { key, labels } of statDefs) {
-    const val = extractInt(labels, '(\\d+)');
+    let val = extractInt(labels, '(\\d+)');
+    if (val === null) val = extractStatNoSep(labels);
     if (val !== null) data[key] = Math.min(30, Math.max(1, val));
   }
 
@@ -192,8 +206,7 @@ function parsePdfText(rawText) {
   );
   data.history = histSection.join('\n').substring(0, 5000);
 
-  // --- Notes: store full text so nothing is lost ---
-  data.notes = '--- Texte extrait du PDF ---\n' + text.substring(0, 5000);
+  data.notes = '';
 
   return data;
 }

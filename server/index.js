@@ -12,6 +12,8 @@ import sessionRoutes from './routes/sessions.js';
 import characterRoutes from './routes/characters.js';
 import mapRoutes from './routes/maps.js';
 import combatRoutes from './routes/combat.js';
+import questRoutes from './routes/quests.js';
+import wikiRoutes from './routes/wiki.js';
 import { setupSocket } from './socket/index.js';
 import { authMiddleware } from './middleware/auth.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,6 +50,8 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/characters', characterRoutes);
 app.use('/api/maps', mapRoutes);
 app.use('/api/combat', combatRoutes);
+app.use('/api/quests', questRoutes);
+app.use('/api/wiki', wikiRoutes);
 
 // Action logs endpoint
 app.get('/api/logs/:sessionId', authMiddleware, (req, res) => {

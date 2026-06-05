@@ -5,11 +5,14 @@ import { useAuth, API } from '../contexts/AuthContext';
 export default function DiceRoller({ sessionId }) {
   const socket = useSocket();
   const { user, token } = useAuth();
-  const [expression, setExpression] = useState('1d20');
+  const storageKey = `dice_expr_${sessionId}`;
+  const [expression, setExpression] = useState(() => sessionStorage.getItem(storageKey) || '1d20');
   const [history, setHistory] = useState([]);
   const [lastResult, setLastResult] = useState(null);
   const [rolling, setRolling] = useState(false);
   const historyRef = useRef(null);
+
+  const setExpressionPersisted = (val) => { setExpression(val); sessionStorage.setItem(storageKey, val); };
 
   useEffect(() => {
     // Fetch history
@@ -17,7 +20,7 @@ export default function DiceRoller({ sessionId }) {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(r => r.ok ? r.json() : [])
-      .then(data => setHistory(data.reverse()));
+      .then(data => setHistory(data));
   }, [sessionId]);
 
   useEffect(() => {
@@ -27,7 +30,7 @@ export default function DiceRoller({ sessionId }) {
         ...data,
         results: typeof data.results === 'string' ? JSON.parse(data.results) : data.results
       };
-      setHistory(prev => [...prev, roll]);
+      setHistory(prev => [roll, ...prev]);
       setLastResult(roll);
       setTimeout(() => {
         if (historyRef.current) {
@@ -94,7 +97,7 @@ export default function DiceRoller({ sessionId }) {
 
   return (
     <div className="animate-fade-in">
-      {/* Last Result Display */}
+      {/* Last Result — always on top */}
       {lastResult && (
         <div className="card" style={{
           textAlign: 'center',
@@ -132,7 +135,7 @@ export default function DiceRoller({ sessionId }) {
           <input
             type="text"
             value={expression}
-            onChange={(e) => setExpression(e.target.value)}
+            onChange={(e) => setExpressionPersisted(e.target.value)}
             placeholder="1d20, 3d6+2, 1d100..."
             onKeyDown={(e) => e.key === 'Enter' && rollDice()}
             style={{ flex: 1, fontSize: '1.1rem', fontWeight: 600, textAlign: 'center' }}
@@ -153,7 +156,7 @@ export default function DiceRoller({ sessionId }) {
             <button
               key={d.value}
               className={`btn btn-sm ${expression === d.value ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { setExpression(d.value); }}
+              onClick={() => setExpressionPersisted(d.value)}
             >
               {d.label}
             </button>
