@@ -140,6 +140,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const lastCursorEmit = useRef(0);
   const lastDrawEmit   = useRef(0);
   const lastFogEmit    = useRef(0);
+  const panStartRef    = useRef({ x: 0, y: 0 }); // avoids re-renders during panning
   const pingAnimRef    = useRef([]);
   const lerpAnimRef    = useRef(null);
   const tokenLastClickRef = useRef({ id: null, time: 0 });
@@ -201,8 +202,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [dragging, setDragging]   = useState(null);
   const [editingMapImg, setEditingMapImg] = useState(null);
   const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart]   = useState({ x: 0, y: 0 });
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [zoom, setZoom]           = useState(1);
   const [selectedToken, setSelectedToken] = useState(null);
   const [showTokenEdit, setShowTokenEdit] = useState(false);
@@ -429,15 +430,21 @@ export default function MapCanvas({ sessionId, isDM }) {
   // Delete key
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.key==='Delete'||e.key==='Backspace')&&selectedTokenRef.current) {
-        const a=document.activeElement;
-        if (a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return;
-        e.preventDefault(); deleteToken(selectedTokenRef.current.id);
+      if (e.key!=='Delete'&&e.key!=='Backspace') return;
+      const a=document.activeElement;
+      if (a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return;
+      // Map-edit mode: Delete clears the background image
+      if (toolRef.current==='map-edit'&&isDMRef.current&&mapImageRef.current) {
+        e.preventDefault();
+        mapImageRef.current=null; setMapImage(null); drawFrame();
+        if (socket&&activeMapRef.current) socket.emit('map-image-clear',{sessionId,mapId:activeMapRef.current.id});
+        return;
       }
+      if (selectedTokenRef.current) { e.preventDefault(); deleteToken(selectedTokenRef.current.id); }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [socket, sessionId, drawFrame]);
 
   // ─── Socket listeners ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -527,6 +534,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       pingAnimRef.current = [...pingAnimRef.current, { x, y, ts: Date.now() }];
       drawFrame();
     };
+    const onGridSize = ({ mapId, gridSize: gs }) => {
+      if (mapId !== activeMapRef.current?.id) return;
+      gridSizeRef.current=gs; setGridSize(gs);
+    };
+    const onMapImageCleared = ({ mapId }) => {
+      if (mapId !== activeMapRef.current?.id) return;
+      mapImageRef.current=null; setMapImage(null); drawFrame();
+    };
 
     socket.on('map-token-update', onTokenUpdate);
     socket.on('map-list-updated', onMapListUpdated);
@@ -542,6 +557,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-deleted', onMapDeleted);
     socket.on('cursor-update', onCursorUpdate);
     socket.on('map-ping', onPing);
+    socket.on('map-grid-size', onGridSize);
+    socket.on('map-image-cleared', onMapImageCleared);
     return () => {
       socket.off('connect', onConnect);
       socket.off('map-token-update', onTokenUpdate);
@@ -558,6 +575,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-deleted', onMapDeleted);
       socket.off('cursor-update', onCursorUpdate);
       socket.off('map-ping', onPing);
+      socket.off('map-grid-size', onGridSize);
+      socket.off('map-image-cleared', onMapImageCleared);
     };
   }, [socket, startLerpAnimation, drawFrame]);
 
@@ -623,9 +642,14 @@ export default function MapCanvas({ sessionId, isDM }) {
     }
     e.target.value='';
   };
-  const deleteCurrentMap = async () => {
-    if (!activeMapRef.current||!confirm(`Supprimer "${activeMapRef.current.name}" ?`)) return;
-    const mapId = activeMapRef.current.id;
+  const deleteCurrentMap = () => {
+    if (!activeMapRef.current) return;
+    setShowDeleteConfirm(true);
+  };
+  const confirmDeleteMap = async () => {
+    setShowDeleteConfirm(false);
+    const mapId = activeMapRef.current?.id;
+    if (!mapId) return;
     const res = await fetch(`${API}/maps/${mapId}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
     if (res.ok) {
       if (socket) socket.emit('map-delete', { sessionId, mapId });
@@ -725,7 +749,8 @@ export default function MapCanvas({ sessionId, isDM }) {
         dragMoved.current=false; isDraggingRef.current=clicked; setDragging(clicked); selectedTokenRef.current=clicked; setSelectedToken(clicked); return;
       }
       setSelectedToken(null); selectedTokenRef.current=null; setShowTokenEdit(false);
-      isPanningRef.current=true; setIsPanning(true); setPanStart({x:e.clientX-panOffsetRef.current.x,y:e.clientY-panOffsetRef.current.y});
+      isPanningRef.current=true; setIsPanning(true);
+      panStartRef.current={x:e.clientX-panOffsetRef.current.x,y:e.clientY-panOffsetRef.current.y};
     }
   };
 
@@ -742,7 +767,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (editingMapImg) {
       const {type,startPos,startX,startY,startW,startH,origW}=editingMapImg;
       const dx=pos.x-startPos.x, dy=pos.y-startPos.y;
-      if (type==='move') { setImgX(startX+dx); setImgY(startY+dy); }
+      if (type==='move') { imgXRef.current=startX+dx; imgYRef.current=startY+dy; }
       else {
         let nw=startW, nx=startX, ny=startY;
         if (type==='se') nw=Math.max(50,startW+dx);
@@ -752,9 +777,9 @@ export default function MapCanvas({ sessionId, isDM }) {
         const ns=nw/origW;
         const nh=(mapImageRef.current?.naturalHeight||1)*ns;
         if (type==='ne'||type==='nw') ny=startY+startH-nh;
-        setImgScale(ns); setImgX(nx); setImgY(ny);
+        imgScaleRef.current=ns; imgXRef.current=nx; imgYRef.current=ny;
       }
-      drawFrame(); return;
+      drawFrame(); return; // setState deferred to mouseUp → no re-renders during drag
     }
     if (fogPainting.current&&isDM) {
       paintFog(pos.x,pos.y,toolRef.current==='fog-add');
@@ -794,7 +819,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
       return;
     }
-    if (isPanningRef.current) { const np={x:e.clientX-panStart.x,y:e.clientY-panStart.y}; panOffsetRef.current=np; setPanOffset(np); drawFrame(); return; }
+    if (isPanningRef.current) { const np={x:e.clientX-panStartRef.current.x,y:e.clientY-panStartRef.current.y}; panOffsetRef.current=np; drawFrame(); return; }
     if (isDraggingRef.current) {
       dragMoved.current=true;
       const sp=snapPos(pos.x,pos.y);
@@ -812,13 +837,18 @@ export default function MapCanvas({ sessionId, isDM }) {
   };
 
   const handleMouseUp = () => {
-    // Clear sync refs immediately — prevents any residual drawing/panning after release
+    // Capture what was active before clearing refs
+    const wasPanning = isPanningRef.current;
     isDrawingRef.current = false;
     isPanningRef.current = false;
     const wasDragging = isDraggingRef.current;
     isDraggingRef.current = null;
 
-    if (editingMapImg) { emitImgTransform(imgXRef.current,imgYRef.current,imgScaleRef.current); setEditingMapImg(null); return; }
+    if (editingMapImg) {
+      // Sync React state from refs (deferred from mousemove for performance)
+      setImgX(imgXRef.current); setImgY(imgYRef.current); setImgScale(imgScaleRef.current);
+      emitImgTransform(imgXRef.current,imgYRef.current,imgScaleRef.current); setEditingMapImg(null); return;
+    }
     if (fogPainting.current) {
       fogPainting.current=false;
       if (socket&&activeMapRef.current) socket.emit('map-fog-paint',{sessionId,mapId:activeMapRef.current.id,fogCells:Array.from(fogCellsRef.current),gridSize:gridSizeRef.current});
@@ -853,6 +883,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
       tokenLastClickRef.current = { id: wasDragging.id, time: now };
     }
+    if (wasPanning) setPanOffset({ ...panOffsetRef.current }); // sync state once after pan (deferred from mousemove)
     setDrawing(false); setIsPanning(false); setDragging(null); drawFrame();
   };
 
@@ -988,7 +1019,11 @@ export default function MapCanvas({ sessionId, isDM }) {
         {isDM&&(
           <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
             <span style={{fontSize:'0.68rem',color:'var(--text-muted)'}}>Grille</span>
-            <input type="range" min={20} max={120} value={gridSize} onChange={e=>setGridSize(Number(e.target.value))} style={{width:'60px',cursor:'pointer'}} />
+            <input type="range" min={20} max={120} value={gridSize} onChange={e=>{
+              const gs=Number(e.target.value);
+              gridSizeRef.current=gs; setGridSize(gs); drawFrame();
+              if (socket&&activeMapRef.current) socket.emit('map-grid-size',{sessionId,mapId:activeMapRef.current.id,gridSize:gs});
+            }} style={{width:'60px',cursor:'pointer'}} />
             <span style={{fontSize:'0.68rem',color:'var(--text-muted)',minWidth:'24px'}}>{gridSize}px</span>
           </div>
         )}
@@ -1016,6 +1051,23 @@ export default function MapCanvas({ sessionId, isDM }) {
         <span style={{fontSize:'0.7rem',color:'var(--text-muted)',whiteSpace:'nowrap'}}>{Math.round(zoom*100)}%</span>
         <span style={{fontSize:'0.65rem',color:'var(--text-muted)'}} title="Clic droit = Ping">📌</span>
       </div>
+
+      {/* Delete map confirmation modal */}
+      {showDeleteConfirm&&(
+        <div style={{position:'fixed',inset:0,zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(6px)',background:'rgba(0,0,0,0.55)'}} onClick={()=>setShowDeleteConfirm(false)}>
+          <div style={{background:'var(--bg-secondary)',border:'1px solid var(--accent-danger)',borderRadius:'var(--radius-lg)',padding:'28px 32px',minWidth:'300px',boxShadow:'0 16px 48px rgba(0,0,0,0.8)',textAlign:'center'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:'2rem',marginBottom:'10px'}}>🗑️</div>
+            <h3 style={{fontFamily:'var(--font-heading)',color:'var(--accent-danger)',marginBottom:'8px'}}>Supprimer la map</h3>
+            <p style={{color:'var(--text-secondary)',marginBottom:'24px',fontSize:'0.9rem'}}>
+              Supprimer <strong style={{color:'var(--text-primary)'}}>{activeMap?.name}</strong> définitivement&nbsp;?
+            </p>
+            <div style={{display:'flex',gap:'10px',justifyContent:'center'}}>
+              <button className="btn btn-secondary" onClick={()=>setShowDeleteConfirm(false)}>Annuler</button>
+              <button className="btn btn-danger" onClick={confirmDeleteMap}>Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Canvas */}
       <div ref={containerRef} style={{flex:1,minHeight:'400px',position:'relative',borderRadius:'var(--radius-md)',overflow:'hidden',border:'1px solid var(--border-color)',cursor:getCursor()}}>

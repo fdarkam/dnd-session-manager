@@ -196,6 +196,21 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-deleted', { mapId });
     });
 
+    // ---- Grid size — live relay (no DB, instant feedback for all players) ----
+    socket.on('map-grid-size', (data) => {
+      const { sessionId, mapId, gridSize } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
+      socket.to(sessionId).emit('map-grid-size', { mapId, gridSize });
+    });
+
+    // ---- Map image clear (Delete key in map-edit mode) ----
+    socket.on('map-image-clear', (data) => {
+      const { sessionId, mapId } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
+      try { db.prepare("UPDATE maps SET image_path = '' WHERE id = ?").run(mapId); } catch {}
+      socket.to(sessionId).emit('map-image-cleared', { mapId });
+    });
+
     // ---- Fog of war — live preview (no DB, same pattern as map-drawing-live) ----
     socket.on('map-fog-live', (data) => {
       const { sessionId, mapId, fogCells, gridSize } = data;
