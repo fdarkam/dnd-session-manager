@@ -26,6 +26,23 @@ export default function ChatPanel({ sessionId }) {
     return () => socket.off('chat-message', handler);
   }, [socket]);
 
+  // Recharger l'historique complet si la connexion socket se rétablit après une coupure.
+  // Les messages reçus pendant la déconnexion auraient été manqués par le listener ci-dessus.
+  useEffect(() => {
+    if (!socket) return;
+    const aDejaConnecte = { current: socket.connected };
+    const onConnect = () => {
+      if (aDejaConnecte.current) {
+        fetch(`${API}/chat/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => { if (data) setMessages(data); });
+      }
+      aDejaConnecte.current = true;
+    };
+    socket.on('connect', onConnect);
+    return () => socket.off('connect', onConnect);
+  }, [socket, sessionId, token]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);

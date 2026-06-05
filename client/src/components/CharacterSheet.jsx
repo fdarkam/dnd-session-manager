@@ -201,7 +201,8 @@ export default function CharacterSheet({ sessionId, isDM }) {
       return;
     }
     setAssignMsg('✅ Assigné !');
-    await fetchCharacters();
+    setSelected(data);
+    setCharacters(prev => prev.map(c => c.id === data.id ? data : c));
     setTimeout(() => setAssignMsg(''), 3000);
   };
 

@@ -10,10 +10,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const [showReset, setShowReset] = useState(false);
-  const [resetDmUser, setResetDmUser] = useState('');
-  const [resetDmPwd, setResetDmPwd] = useState('');
   const [resetTarget, setResetTarget] = useState('');
   const [resetNewPwd, setResetNewPwd] = useState('');
+  const [resetCode, setResetCode] = useState('');
   const [resetMsg, setResetMsg] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
@@ -34,25 +33,20 @@ export default function LoginPage() {
     }
   };
 
-  const handleDmReset = async (e) => {
+  const handleReset = async (e) => {
     e.preventDefault();
     setResetMsg('');
     setResetLoading(true);
     try {
-      const res = await fetch(`${API}/auth/dm-reset`, {
+      const res = await fetch(`${API}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dmUsername: resetDmUser,
-          dmPassword: resetDmPwd,
-          targetUsername: resetTarget,
-          newPassword: resetNewPwd,
-        }),
+        body: JSON.stringify({ username: resetTarget, newPassword: resetNewPwd, resetCode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setResetMsg('✅ Mot de passe réinitialisé ! Le joueur peut se reconnecter.');
-      setResetDmUser(''); setResetDmPwd(''); setResetTarget(''); setResetNewPwd('');
+      setResetMsg('✅ Mot de passe réinitialisé !');
+      setResetTarget(''); setResetNewPwd(''); setResetCode('');
     } catch (err) {
       setResetMsg('❌ ' + err.message);
     } finally {
@@ -189,10 +183,10 @@ export default function LoginPage() {
           <>
             <div style={{ marginBottom: 'var(--space-md)' }}>
               <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--accent-primary)', fontSize: '1rem', marginBottom: '6px' }}>
-                🔑 Réinitialisation par le MJ
+                🔑 Réinitialiser un mot de passe
               </h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                Le Maître de Jeu entre ses identifiants pour définir un nouveau mot de passe à un joueur.
+                Entrez le code de réinitialisation (par défaut : <code>dndmaster</code>) pour changer le mot de passe d'un compte.
               </p>
             </div>
             {resetMsg && (
@@ -208,28 +202,18 @@ export default function LoginPage() {
                 {resetMsg}
               </div>
             )}
-            <form onSubmit={handleDmReset}>
-              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', fontWeight: 600 }}>Identifiants du MJ</p>
-                <div className="form-group">
-                  <label>Pseudo MJ</label>
-                  <input type="text" value={resetDmUser} onChange={(e) => setResetDmUser(e.target.value)} required autoFocus autoComplete="username" />
-                </div>
-                <div className="form-group">
-                  <label>Mot de passe MJ</label>
-                  <input type="password" value={resetDmPwd} onChange={(e) => setResetDmPwd(e.target.value)} required autoComplete="current-password" />
-                </div>
+            <form onSubmit={handleReset}>
+              <div className="form-group">
+                <label>Pseudo du compte</label>
+                <input type="text" value={resetTarget} onChange={(e) => setResetTarget(e.target.value)} required autoFocus autoComplete="off" />
               </div>
-              <div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', fontWeight: 600 }}>Joueur à réinitialiser</p>
-                <div className="form-group">
-                  <label>Pseudo du joueur</label>
-                  <input type="text" value={resetTarget} onChange={(e) => setResetTarget(e.target.value)} required autoComplete="off" />
-                </div>
-                <div className="form-group">
-                  <label>Nouveau mot de passe</label>
-                  <input type="password" value={resetNewPwd} onChange={(e) => setResetNewPwd(e.target.value)} minLength={4} required autoComplete="new-password" />
-                </div>
+              <div className="form-group">
+                <label>Nouveau mot de passe</label>
+                <input type="password" value={resetNewPwd} onChange={(e) => setResetNewPwd(e.target.value)} minLength={4} required autoComplete="new-password" />
+              </div>
+              <div className="form-group">
+                <label>Code de réinitialisation</label>
+                <input type="password" value={resetCode} onChange={(e) => setResetCode(e.target.value)} required autoComplete="off" placeholder="dndmaster" />
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
                 <button type="submit" className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={resetLoading}>

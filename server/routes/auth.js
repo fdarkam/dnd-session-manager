@@ -111,40 +111,27 @@ router.put('/password', authMiddleware, async (req, res) => {
   }
 });
 
-// DM resets a player's password (no auth token required — DM authenticates via credentials)
-router.post('/dm-reset', async (req, res) => {
+// Reset a user's password using a reset code (configured via RESET_CODE env var)
+router.post('/reset-password', async (req, res) => {
   try {
-    const { dmUsername, dmPassword, targetUsername, newPassword } = req.body;
-    if (!dmUsername || !dmPassword || !targetUsername || !newPassword)
-      return res.status(400).json({ error: 'Tous les champs sont requis' });
+    const { username, newPassword, resetCode } = req.body;
+    if (!username || !newPassword || !resetCode)
+      return res.status(400).json({ error: 'Pseudo, nouveau mot de passe et code requis' });
     if (newPassword.length < 4)
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 4 caractères' });
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 4 caractères' });
 
-    // Verify DM credentials
-    const dm = db.prepare('SELECT * FROM users WHERE username = ?').get(dmUsername.trim());
-    if (!dm) return res.status(400).json({ error: 'Identifiants MJ incorrects' });
-    const dmValid = await bcrypt.compare(dmPassword, dm.password);
-    if (!dmValid) return res.status(400).json({ error: 'Identifiants MJ incorrects' });
+    const expected = process.env.RESET_CODE || 'dndmaster';
+    if (resetCode !== expected)
+      return res.status(403).json({ error: 'Code de réinitialisation incorrect' });
 
-    // Verify target user exists
-    const target = db.prepare('SELECT * FROM users WHERE username = ?').get(targetUsername.trim());
-    if (!target) return res.status(404).json({ error: 'Joueur introuvable' });
-    if (target.id === dm.id) return res.status(400).json({ error: 'Utilisez votre profil pour changer votre propre mot de passe' });
-
-    // Verify DM and target share at least one session where DM has dm role
-    const sharedSession = db.prepare(`
-      SELECT sm1.session_id FROM session_members sm1
-      JOIN session_members sm2 ON sm1.session_id = sm2.session_id
-      WHERE sm1.user_id = ? AND sm1.role = 'dm' AND sm2.user_id = ?
-      LIMIT 1
-    `).get(dm.id, target.id);
-    if (!sharedSession) return res.status(403).json({ error: 'Vous n\'êtes pas MJ d\'une session commune avec ce joueur' });
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
     const hashed = await bcrypt.hash(newPassword, 10);
-    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, target.id);
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, user.id);
     res.json({ success: true });
   } catch (err) {
-    console.error('DM reset error:', err);
+    console.error('Reset password error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -4,6 +4,7 @@ import db from '../db.js';
 import { JWT_SECRET } from '../middleware/auth.js';
 
 export function setupSocket(io) {
+  // Authentification JWT sur chaque connexion socket
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Token manquant'));
@@ -20,13 +21,50 @@ export function setupSocket(io) {
   }
 
   io.on('connection', (socket) => {
-    console.log(`✅ ${socket.user.username} connected`);
+    console.log(`✅ ${socket.user.username} connecté`);
 
+    // ---- Rejoindre une session ----
     socket.on('join-session', (sessionId) => {
-      if (!isMember(sessionId, socket.user.id)) { socket.emit('error', { message: 'Accès refusé' }); return; }
+      if (!isMember(sessionId, socket.user.id)) {
+        socket.emit('error', { message: 'Accès refusé' });
+        return;
+      }
       socket.join(sessionId);
       socket.sessionId = sessionId;
       socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id });
+
+      // Envoyer l'état actuel de la map active UNIQUEMENT à ce socket (pas broadcast).
+      // Déclenché à chaque join-session, y compris après reconnexion automatique.
+      // Permet à un joueur qui revient en ligne de récupérer tokens/fog/tracés sans reload.
+      try {
+        const activeMap = db.prepare(
+          'SELECT * FROM maps WHERE session_id = ? AND is_active = 1'
+        ).get(sessionId);
+
+        if (activeMap) {
+          // Parser fog_data (format { cells:[], gs:40 })
+          let fogCells = [];
+          let gridSize = 40;
+          try {
+            const raw = JSON.parse(activeMap.fog_data || '[]');
+            fogCells = Array.isArray(raw) ? raw : (raw.cells || []);
+            gridSize = Array.isArray(raw) ? 40 : (raw.gs || 40);
+          } catch {}
+
+          socket.emit('map-sync', {
+            mapId:    activeMap.id,
+            tokens:   JSON.parse(activeMap.tokens   || '[]'),
+            drawings: JSON.parse(activeMap.drawings  || '[]'),
+            fogCells,
+            gridSize,
+            img_x:     activeMap.img_x    || 0,
+            img_y:     activeMap.img_y    || 0,
+            img_scale: activeMap.img_scale || 1.0,
+          });
+        }
+      } catch (err) {
+        console.error('Erreur map-sync :', err);
+      }
     });
 
     socket.on('leave-session', (sessionId) => {
@@ -34,7 +72,7 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('user-left', { username: socket.user.username, id: socket.user.id });
     });
 
-    // ---- Dice ----
+    // ---- Dés ----
     socket.on('dice-roll', (data) => {
       const { sessionId, expression, results, total } = data;
       if (!isMember(sessionId, socket.user.id)) return;
@@ -58,22 +96,27 @@ export function setupSocket(io) {
     socket.on('chat-message', (data) => {
       const { sessionId, content } = data;
       if (!isMember(sessionId, socket.user.id)) return;
-      const msg = { id: uuidv4(), session_id: sessionId, user_id: socket.user.id, username: socket.user.username, content, created_at: new Date().toISOString() };
-      try { db.prepare('INSERT INTO chat_messages (id, session_id, user_id, username, content) VALUES (?, ?, ?, ?, ?)').run(msg.id, msg.session_id, msg.user_id, msg.username, msg.content); } catch {}
+      const msg = {
+        id: uuidv4(), session_id: sessionId, user_id: socket.user.id,
+        username: socket.user.username, content, created_at: new Date().toISOString()
+      };
+      try {
+        db.prepare('INSERT INTO chat_messages (id, session_id, user_id, username, content) VALUES (?, ?, ?, ?, ?)')
+          .run(msg.id, msg.session_id, msg.user_id, msg.username, msg.content);
+      } catch {}
       io.to(sessionId).emit('chat-message', msg);
     });
 
-    // ---- Token: ADD single token ----
+    // ---- Token : ajout ----
     socket.on('map-token-add', (data) => {
       const { sessionId, mapId, token: newToken, allTokens } = data;
       if (!isMember(sessionId, socket.user.id)) return;
       try {
         let tokens;
         if (Array.isArray(allTokens)) {
-          // Client sends its full current list — use it directly (avoids DB read race)
+          // Le client envoie sa liste complète — évite une lecture DB en concurrence
           tokens = allTokens;
         } else {
-          // Fallback: merge new token into DB state
           const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
           tokens = JSON.parse(map?.tokens || '[]');
           const idx = tokens.findIndex(t => t.id === newToken.id);
@@ -84,7 +127,7 @@ export function setupSocket(io) {
       } catch (err) { console.error('DB token-add error:', err); }
     });
 
-    // ---- Token: MOVE/UPDATE — live=true skips DB save (real-time drag) ----
+    // ---- Token : déplacement — live=true ne persiste pas (drag temps réel) ----
     socket.on('map-token-move', (data) => {
       const { sessionId, mapId, tokens, live } = data;
       if (!isMember(sessionId, socket.user.id)) return;
@@ -95,7 +138,7 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-token-update', { mapId, tokens, live });
     });
 
-    // ---- Token: DELETE single token ----
+    // ---- Token : suppression ----
     socket.on('map-token-delete', (data) => {
       const { sessionId, mapId, tokenId } = data;
       if (!isMember(sessionId, socket.user.id)) return;
@@ -107,19 +150,19 @@ export function setupSocket(io) {
       } catch (err) { console.error('DB token-delete error:', err); }
     });
 
-    // ---- Drawing: live stroke segment (no DB — broadcast only) ----
+    // ---- Dessin : segment live (pas de DB — broadcast only) ----
     socket.on('map-drawing-live', (data) => {
       const { sessionId, ...rest } = data;
       socket.to(sessionId).emit('map-drawing-live', rest);
     });
 
-    // ---- Drawing: stroke finalized (broadcast clear-live signal) ----
+    // ---- Dessin : finalisation du tracé ----
     socket.on('map-drawing-finalize', (data) => {
       const { sessionId, pathId } = data;
       socket.to(sessionId).emit('map-drawing-finalize', { pathId });
     });
 
-    // ---- Drawing ----
+    // ---- Dessin : tracé complet → DB ----
     socket.on('map-drawing', (data) => {
       const { sessionId, mapId, path } = data;
       if (!isMember(sessionId, socket.user.id)) return;
@@ -150,14 +193,14 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-drawings-cleared', { mapId });
     });
 
-    // ---- Map uploaded — notify other clients to refresh their list ----
+    // ---- Map : nouvelle image uploadée ----
     socket.on('map-uploaded', (data) => {
       const { sessionId } = data;
       if (!isDM(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-list-updated');
     });
 
-    // ---- Map switch (per-map independent tokens) ----
+    // ---- Map : changement de map active ----
     socket.on('map-change', (data) => {
       const { sessionId, mapId, currentMapId, tokens: currentTokens } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -177,7 +220,7 @@ export function setupSocket(io) {
       io.to(sessionId).emit('map-changed', { mapId, map: mapData });
     });
 
-    // ---- Map image transform (move/resize) ----
+    // ---- Map : transformation image (position/échelle) ----
     socket.on('map-image-transform', (data) => {
       const { sessionId, mapId, img_x, img_y, img_scale } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -188,7 +231,7 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-image-updated', { mapId, img_x, img_y, img_scale });
     });
 
-    // ---- Map delete ----
+    // ---- Map : suppression ----
     socket.on('map-delete', (data) => {
       const { sessionId, mapId } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -196,14 +239,14 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-deleted', { mapId });
     });
 
-    // ---- Grid size — live relay (no DB, instant feedback for all players) ----
+    // ---- Grille : changement de taille — relay uniquement (pas de DB) ----
     socket.on('map-grid-size', (data) => {
       const { sessionId, mapId, gridSize } = data;
       if (!isDM(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-grid-size', { mapId, gridSize });
     });
 
-    // ---- Map image clear (Delete key in map-edit mode) ----
+    // ---- Image de fond : suppression (touche Suppr en mode map-edit) ----
     socket.on('map-image-clear', (data) => {
       const { sessionId, mapId } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -211,14 +254,14 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-image-cleared', { mapId });
     });
 
-    // ---- Fog of war — live preview (no DB, same pattern as map-drawing-live) ----
+    // ---- Fog of war : prévisualisation live (pas de DB) ----
     socket.on('map-fog-live', (data) => {
       const { sessionId, mapId, fogCells, gridSize } = data;
       if (!isDM(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-fog-live', { mapId, fogCells, gridSize });
     });
 
-    // ---- Fog of war — final save ----
+    // ---- Fog of war : sauvegarde finale ----
     socket.on('map-fog-paint', (data) => {
       const { sessionId, mapId, fogCells, gridSize } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -229,13 +272,15 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-fog-update', { mapId, fogCells, gridSize });
     });
 
-    // ---- Real-time cursor positions ----
+    // ---- Curseurs en temps réel ----
     socket.on('cursor-move', (data) => {
       const { sessionId, x, y } = data;
-      socket.to(sessionId).emit('cursor-update', { userId: socket.user.id, username: socket.user.username, x, y });
+      socket.to(sessionId).emit('cursor-update', {
+        userId: socket.user.id, username: socket.user.username, x, y
+      });
     });
 
-    // ---- Ping (click to draw attention) ----
+    // ---- Ping (attirer l'attention sur la carte) ----
     socket.on('map-ping', (data) => {
       const { sessionId, x, y } = data;
       if (!isMember(sessionId, socket.user.id)) return;
@@ -259,21 +304,28 @@ export function setupSocket(io) {
       if (!isDM(sessionId, socket.user.id)) return;
       io.to(sessionId).emit('combat-turn-changed', encounter);
       if (encounter?.entities) {
-        const entities = typeof encounter.entities === 'string' ? JSON.parse(encounter.entities) : encounter.entities;
+        const entities = typeof encounter.entities === 'string'
+          ? JSON.parse(encounter.entities) : encounter.entities;
         const active = entities[encounter.current_turn];
-        if (active) io.to(sessionId).emit('notification', { type: 'turn', message: `C'est au tour de ${active.name} !`, entity: active });
+        if (active) io.to(sessionId).emit('notification', {
+          type: 'turn', message: `C'est au tour de ${active.name} !`, entity: active
+        });
       }
     });
 
-    // ---- Character sync ----
+    // ---- Sync fiche de personnage ----
     socket.on('character-update', (data) => {
       const { sessionId, character } = data;
       socket.to(sessionId).emit('character-updated', character);
     });
 
     socket.on('disconnect', () => {
-      if (socket.sessionId) socket.to(socket.sessionId).emit('user-left', { username: socket.user.username, id: socket.user.id });
-      console.log(`❌ ${socket.user.username} disconnected`);
+      if (socket.sessionId) {
+        socket.to(socket.sessionId).emit('user-left', {
+          username: socket.user.username, id: socket.user.id
+        });
+      }
+      console.log(`❌ ${socket.user.username} déconnecté`);
     });
   });
 }

@@ -13,6 +13,7 @@ import ProfileModal from '../components/ProfileModal';
 export default function SessionPage({ sessionId, onBack }) {
   const { user, token, logout } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
+  const [showChat, setShowChat] = useState(true);
   const socket = useSocket();
   const { currentSessionRef } = useSocketContext();
   const [session, setSession] = useState(null);
@@ -117,13 +118,16 @@ export default function SessionPage({ sessionId, onBack }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>⚔️ {user.username}</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowChat(v => !v)} title={showChat ? 'Masquer le chat' : 'Afficher le chat'}>
+            {showChat ? '💬' : '💬̶'}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowProfile(true)} title="Mon profil">👤</button>
           <button className="btn btn-secondary btn-sm" onClick={logout}>Décon.</button>
         </div>
       </nav>
 
       {/* Main Content */}
-      <div className="session-layout" style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="session-layout" style={{ flex: 1, overflow: 'hidden', gridTemplateColumns: showChat ? '1fr 360px' : '1fr' }}>
         {/* Tabs */}
         <div style={{
           gridColumn: '1',
@@ -164,9 +168,11 @@ export default function SessionPage({ sessionId, onBack }) {
         </div>
 
         {/* Chat Sidebar */}
-        <div className="session-sidebar">
-          <ChatPanel sessionId={sessionId} />
-        </div>
+        {showChat && (
+          <div className="session-sidebar">
+            <ChatPanel sessionId={sessionId} />
+          </div>
+        )}
       </div>
     </div>
   );
