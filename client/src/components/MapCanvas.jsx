@@ -200,6 +200,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [fogColor, setFogColor] = useState('#000000');
   const [fogOpacity, setFogOpacity] = useState(0.85);
   const [snapToGrid, setSnapToGrid] = useState(false);
+  // Toggle visibilité de la grille (indépendant du snap-to-grid)
+  const [showGrid, setShowGrid] = useState(true);
+  const showGridRef = useRef(true);
   const [drawing, setDrawing] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [editingMapImg, setEditingMapImg] = useState(null);
@@ -285,12 +288,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
     }
 
-    // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = 0.5 / z;
-    const gx0 = Math.floor(wx0 / gs) * gs, gy0 = Math.floor(wy0 / gs) * gs;
-    for (let x = gx0; x <= wx0 + W + gs; x += gs) { ctx.beginPath(); ctx.moveTo(x, gy0 - gs); ctx.lineTo(x, wy0 + H + gs); ctx.stroke(); }
-    for (let y = gy0; y <= wy0 + H + gs; y += gs) { ctx.beginPath(); ctx.moveTo(gx0 - gs, y); ctx.lineTo(wx0 + W + gs, y); ctx.stroke(); }
+    // Grille — affichée seulement si showGridRef est activé
+    if (showGridRef.current) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 0.5 / z;
+      const gx0 = Math.floor(wx0 / gs) * gs, gy0 = Math.floor(wy0 / gs) * gs;
+      for (let x = gx0; x <= wx0 + W + gs; x += gs) { ctx.beginPath(); ctx.moveTo(x, gy0 - gs); ctx.lineTo(x, wy0 + H + gs); ctx.stroke(); }
+      for (let y = gy0; y <= wy0 + H + gs; y += gs) { ctx.beginPath(); ctx.moveTo(gx0 - gs, y); ctx.lineTo(wx0 + W + gs, y); ctx.stroke(); }
+    }
 
     // Saved drawings
     pathsRef.current.forEach(path => {
@@ -686,8 +691,14 @@ export default function MapCanvas({ sessionId, isDM }) {
     const fd = new FormData(); fd.append('image', f); fd.append('session_id', sessionId); fd.append('name', f.name.replace(/\.[^.]+$/, ''));
     const res = await fetch(`${API}/maps`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
     if (res.ok) {
-      fetchMaps();
-      if (socket) socket.emit('map-uploaded', { sessionId });
+      const newMap = await res.json();
+      fetchMaps(); // rafraîchir la liste locale
+      if (socket) {
+        // Notifier les autres que la liste a changé
+        socket.emit('map-uploaded', { sessionId });
+        // Basculer immédiatement vers la nouvelle map pour tout le monde (MJ + joueurs)
+        socket.emit('map-change', { sessionId, mapId: newMap.id, currentMapId: activeMapRef.current?.id, tokens: tokensRef.current });
+      }
     }
     e.target.value = '';
   };
@@ -1071,6 +1082,10 @@ export default function MapCanvas({ sessionId, isDM }) {
 
         <div style={{ width: '1px', height: '20px', background: 'var(--border-color)', margin: '0 2px', flexShrink: 0 }} />
 
+        {/* Toggle affichage de la grille */}
+        <button className={`btn btn-sm ${showGrid ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => { const v = !showGrid; showGridRef.current = v; setShowGrid(v); drawFrame(); }} title={showGrid ? 'Masquer la grille' : 'Afficher la grille'}>▦</button>
+        {/* Toggle alignement sur la grille */}
         <button className={`btn btn-sm ${snapToGrid ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => { setSnapToGrid(v => !v); snapToGridRef.current = !snapToGrid; }} title="Aligner sur la grille">⊞</button>
 

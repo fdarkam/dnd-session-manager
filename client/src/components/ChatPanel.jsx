@@ -59,9 +59,11 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
     e.preventDefault();
     if (!input.trim() || !socket) return;
 
-    // Commande /roll — interceptée et convertie en lancer de dés sans passer par le chat
-    if (input.trim().toLowerCase().startsWith('/roll')) {
-      const expr = input.trim().slice(5).trim(); // supprimer "/roll "
+    // Commandes dés — formats supportés : /roll, !roll, !r (syntaxe Avrae)
+    // Interceptées avant l'envoi dans le chat et converties en lancer de dés socket
+    const diceMatch = input.trim().match(/^(?:\/roll|!roll|!r)\s+(.+)$/i);
+    if (diceMatch) {
+      const expr = diceMatch[1].trim();
       if (parseDice(expr)) {
         const roll = rollFromExpr(expr);
         socket.emit('dice-roll', {
@@ -73,7 +75,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
         setInput('');
         return;
       }
-      // Expression invalide : laisser passer comme message texte normal
+      // Expression invalide — laisser passer comme message texte
     }
 
     // Message standard ou privé (destinataire uniquement accessible au MJ)
@@ -235,7 +237,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
           placeholder={
             isDM && targetUserId
               ? `Message privé → ${getMemberName(targetUserId)}…`
-              : '/roll 1d20+3  ou  message…'
+              : '!r 1d20  ou  message…'
           }
           style={{ flex: 1, fontSize: '0.85rem', padding: '8px 12px' }}
         />
