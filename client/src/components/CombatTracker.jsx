@@ -146,21 +146,14 @@ export default function CombatTracker({ sessionId, isDM }) {
 
   if (!encounter) {
     return (
-      <div className="card animate-fade-in" style={{ textAlign: 'center', padding: 'var(--space-2xl)' }}>
-        <div style={{ fontSize: '3rem', marginBottom: 'var(--space-md)' }}>⚔️</div>
-        <h3 style={{ fontFamily: 'var(--font-heading)', marginBottom: 'var(--space-md)' }}>Aucun combat en cours</h3>
+      <div className="card animate-fade-in" style={{ textAlign: 'center', padding: 'var(--space-lg)' }}>
+        <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-sm)' }}>⚔️</div>
+        <h3 style={{ fontFamily: 'var(--font-heading)', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>Aucun combat en cours</h3>
         {isDM && (
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', justifyContent: 'center', alignItems: 'center' }}>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Nom du combat"
-              style={{ maxWidth: '200px' }}
-            />
-            <button className="btn btn-primary" onClick={createEncounter}>
-              ⚔️ Lancer un combat
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', alignItems: 'stretch' }}>
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)}
+              placeholder="Nom du combat" onKeyDown={e => e.key === 'Enter' && createEncounter()} />
+            <button className="btn btn-primary" onClick={createEncounter}>⚔️ Lancer un combat</button>
           </div>
         )}
       </div>
@@ -172,26 +165,22 @@ export default function CombatTracker({ sessionId, isDM }) {
   return (
     <div className="animate-fade-in">
       {/* Combat Header */}
-      <div className="card" style={{ marginBottom: 'var(--space-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--accent-primary)' }}>
-            ⚔️ {encounter.name || 'Combat'}
-          </h3>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Round {encounter.round} • {encounter.entities.length} entités
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+      <div className="card" style={{ marginBottom: 'var(--space-sm)', padding: 'var(--space-sm)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--accent-primary)', fontSize: '0.95rem', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}>
+              ⚔️ {encounter.name || 'Combat'}
+            </h3>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Round {encounter.round} • {encounter.entities.length} entités
+            </span>
+          </div>
           {isDM && (
-            <>
-              <button className="btn btn-secondary btn-sm" onClick={prevTurn}>◀</button>
-              <button className="btn btn-primary" onClick={nextTurn}>
-                Tour suivant ▶
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={endCombat}>
-                Fin du combat
-              </button>
-            </>
+            <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+              <button className="btn btn-secondary btn-sm" onClick={prevTurn} title="Tour précédent">◀</button>
+              <button className="btn btn-primary btn-sm" onClick={nextTurn} title="Tour suivant">Tour ▶</button>
+              <button className="btn btn-danger btn-sm" onClick={endCombat} title="Fin du combat">✕</button>
+            </div>
           )}
         </div>
       </div>

@@ -45,6 +45,10 @@ router.put('/:id', authMiddleware, (req, res) => {
     const encounter = db.prepare('SELECT * FROM combat_encounters WHERE id = ?').get(req.params.id);
     if (!encounter) return res.status(404).json({ error: 'Combat non trouvé' });
 
+    const member = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
+      .get(encounter.session_id, req.user.id);
+    if (!member || member.role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut modifier le combat' });
+
     const { entities, current_turn, round, is_active } = req.body;
     const updates = [];
     const values = [];
@@ -68,6 +72,13 @@ router.put('/:id', authMiddleware, (req, res) => {
 
 router.delete('/:id', authMiddleware, (req, res) => {
   try {
+    const encounter = db.prepare('SELECT * FROM combat_encounters WHERE id = ?').get(req.params.id);
+    if (!encounter) return res.status(404).json({ error: 'Combat non trouvé' });
+
+    const member = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
+      .get(encounter.session_id, req.user.id);
+    if (!member || member.role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut supprimer un combat' });
+
     db.prepare('DELETE FROM combat_encounters WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {

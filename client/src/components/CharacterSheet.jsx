@@ -11,11 +11,27 @@ export default function CharacterSheet({ sessionId, isDM }) {
   const [showTransfer, setShowTransfer] = useState(false);
   const [userSessions, setUserSessions] = useState([]);
   const [transferring, setTransferring] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [assignMsg, setAssignMsg] = useState('');
   const saveTimeout = useRef(null);
 
   useEffect(() => {
     fetchCharacters();
   }, [sessionId]);
+
+  useEffect(() => {
+    if (isDM && sessionId) fetchMembers();
+  }, [isDM, sessionId]);
+
+  const fetchMembers = async () => {
+    const res = await fetch(`${API}/sessions/${sessionId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMembers(data.members || []);
+    }
+  };
 
   const fetchCharacters = async () => {
     const res = await fetch(`${API}/characters/session/${sessionId}`, {
@@ -171,7 +187,26 @@ export default function CharacterSheet({ sessionId, isDM }) {
     setSelected(null);
   };
 
-  const canEdit = isDM || (selected && selected.user_id === user.id);
+  const assignCharacter = async (userId) => {
+    if (!selected) return;
+    setAssignMsg('');
+    const res = await fetch(`${API}/characters/${selected.id}/assign`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ assigned_user_id: userId || null })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAssignMsg('❌ ' + data.error);
+      return;
+    }
+    setAssignMsg('✅ Assigné !');
+    setSelected(data);
+    setCharacters(prev => prev.map(c => c.id === data.id ? data : c));
+    setTimeout(() => setAssignMsg(''), 3000);
+  };
+
+  const canEdit = isDM || (selected && (selected.user_id === user.id || selected.assigned_user_id === user.id));
 
   const getModifier = (stat) => {
     const mod = Math.floor((stat - 10) / 2);
@@ -202,10 +237,12 @@ export default function CharacterSheet({ sessionId, isDM }) {
             onClick={() => setSelected(c)}
           >
             {c.name || 'Sans nom'}
-            {isDM && c.player_name && <span style={{ opacity: 0.7, marginLeft: '4px' }}>({c.player_name})</span>}
+            {isDM && (c.assigned_player_name || c.player_name) && (
+              <span style={{ opacity: 0.7, marginLeft: '4px' }}>({c.assigned_player_name || c.player_name})</span>
+            )}
           </button>
         ))}
-        <button className="btn btn-secondary btn-sm" onClick={createCharacter}>+ Nouveau</button>
+        {isDM && <button className="btn btn-secondary btn-sm" onClick={createCharacter}>+ Nouveau</button>}
         <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
           📥 JSON
           <input type="file" accept=".json" onChange={importCharacter} style={{ display: 'none' }} />
@@ -323,6 +360,26 @@ export default function CharacterSheet({ sessionId, isDM }) {
                 <label>Niveau</label>
                 <input type="number" value={selected.level || 1} onChange={(e) => updateField('level', parseInt(e.target.value) || 1)} disabled={!canEdit} min={1} max={20} />
               </div>
+              {isDM && (
+                <div className="form-group">
+                  <label>Joueur assigné</label>
+                  <select
+                    value={selected.assigned_user_id || ''}
+                    onChange={(e) => assignCharacter(e.target.value)}
+                  >
+                    <option value="">— Non assigné —</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.id}>{m.username}</option>
+                    ))}
+                  </select>
+                  {assignMsg && (
+                    <div style={{
+                      fontSize: '0.8rem', marginTop: '4px',
+                      color: assignMsg.startsWith('❌') ? 'var(--accent-danger)' : 'var(--accent-success)'
+                    }}>{assignMsg}</div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* HP */}

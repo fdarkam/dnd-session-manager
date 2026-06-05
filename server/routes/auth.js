@@ -72,4 +72,68 @@ router.get('/me', authMiddleware, (req, res) => {
   }
 });
 
+// Update username
+router.put('/profile', authMiddleware, async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username || username.trim().length < 3)
+      return res.status(400).json({ error: 'Le pseudo doit contenir au moins 3 caractères' });
+    const trimmed = username.trim();
+    const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(trimmed, req.user.id);
+    if (existing) return res.status(400).json({ error: 'Ce pseudo est déjà pris' });
+    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(trimmed, req.user.id);
+    // Re-issue token with new username so client stays valid
+    const newToken = jwt.sign({ id: req.user.id, username: trimmed }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token: newToken, user: { id: req.user.id, username: trimmed } });
+  } catch (err) {
+    console.error('Profile update error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Change password (requires current password verification)
+router.put('/password', authMiddleware, async (req, res) => {
+  try {
+    const { current, newPassword } = req.body;
+    if (!current || !newPassword)
+      return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis' });
+    if (newPassword.length < 4)
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 4 caractères' });
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const valid = await bcrypt.compare(current, user.password);
+    if (!valid) return res.status(400).json({ error: 'Mot de passe actuel incorrect' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, req.user.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Password change error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Reset a user's password using a reset code (configured via RESET_CODE env var)
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { username, newPassword, resetCode } = req.body;
+    if (!username || !newPassword || !resetCode)
+      return res.status(400).json({ error: 'Pseudo, nouveau mot de passe et code requis' });
+    if (newPassword.length < 4)
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 4 caractères' });
+
+    const expected = process.env.RESET_CODE || 'dndmaster';
+    if (resetCode !== expected)
+      return res.status(403).json({ error: 'Code de réinitialisation incorrect' });
+
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, user.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 export default router;

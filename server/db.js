@@ -116,6 +116,30 @@ db.exec(`
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS quests (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    is_private INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    created_by TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS wiki_pages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT DEFAULT 'Général',
+    content TEXT DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS action_logs (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -139,6 +163,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_maps_session ON maps(session_id);
   CREATE INDEX IF NOT EXISTS idx_combat_encounters_session ON combat_encounters(session_id);
   CREATE INDEX IF NOT EXISTS idx_action_logs_session ON action_logs(session_id);
+  CREATE INDEX IF NOT EXISTS idx_quests_session ON quests(session_id);
+  CREATE INDEX IF NOT EXISTS idx_wiki_pages_session ON wiki_pages(session_id);
 `);
 
 // ---- Migrations for existing databases ----
@@ -151,9 +177,18 @@ const newCols = [
   ['characters', 'capacities', "TEXT DEFAULT '[]'"],
   ['characters', 'equipment', "TEXT DEFAULT '[]'"],
   ['characters', 'history', "TEXT DEFAULT ''"],
+  ['maps', 'fog_enabled', 'INTEGER DEFAULT 0'],
+  ['maps', 'fog_data', "TEXT DEFAULT '[]'"],
+  ['maps', 'img_x', 'INTEGER DEFAULT 0'],
+  ['maps', 'img_y', 'INTEGER DEFAULT 0'],
+  ['maps', 'img_scale', 'REAL DEFAULT 1.0'],
+  // Migration Feature 3 : colonne destinataire pour les messages privés MJ → joueur
+  ['chat_messages', 'target_user_id', 'TEXT DEFAULT NULL'],
 ];
 for (const [table, col, def] of newCols) {
-  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch {}
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) {
+    if (!e.message.includes('duplicate column')) console.error('Migration error:', e.message);
+  }
 }
 
 export default db;

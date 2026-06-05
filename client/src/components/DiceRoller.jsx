@@ -1,15 +1,81 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth, API } from '../contexts/AuthContext';
+import { parseDice } from '../utils/dice';
+
+// ─── Sound configuration — placez vos fichiers dans client/public/sounds/ ────
+//     Laissez vide ('') pour utiliser le son procédural généré automatiquement.
+const SOUND_FILES = {
+  nat20: '/sounds/nat20.mp3',
+  nat1:  '/sounds/fart.mp3',
+  roll:  '/sounds/roll_dice.mp3',
+};
+
+// ─── Web Audio fallback (si le fichier est absent ou vide) ───────────────────
+function _proceduralNat20(ctx) {
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+    const osc = ctx.createOscillator(); const g = ctx.createGain();
+    osc.connect(g); g.connect(ctx.destination);
+    osc.type = 'sine'; osc.frequency.value = freq;
+    const t = ctx.currentTime + i * 0.13;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.3, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.22);
+    osc.start(t); osc.stop(t + 0.25);
+  });
+}
+function _proceduralNat1(ctx) {
+  const osc = ctx.createOscillator(); const g = ctx.createGain(); const filter = ctx.createBiquadFilter();
+  osc.connect(filter); filter.connect(g); g.connect(ctx.destination);
+  osc.type = 'sawtooth'; filter.type = 'lowpass'; filter.frequency.value = 700;
+  osc.frequency.setValueAtTime(360, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.9);
+  g.gain.setValueAtTime(0.22, ctx.currentTime); g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.9);
+  osc.start(); osc.stop(ctx.currentTime + 0.9);
+}
+function _proceduralRoll(ctx) {
+  const len = Math.floor(ctx.sampleRate * 0.16);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate); const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.8);
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const g = ctx.createGain(); g.gain.value = 0.2;
+  src.connect(g); g.connect(ctx.destination); src.start();
+}
+const PROCEDURAL = { nat20: _proceduralNat20, nat1: _proceduralNat1, roll: _proceduralRoll };
 
 export default function DiceRoller({ sessionId }) {
   const socket = useSocket();
   const { user, token } = useAuth();
-  const [expression, setExpression] = useState('1d20');
+  const storageKey = `dice_expr_${sessionId}`;
+  const [expression, setExpression] = useState(() => sessionStorage.getItem(storageKey) || '1d20');
   const [history, setHistory] = useState([]);
   const [lastResult, setLastResult] = useState(null);
   const [rolling, setRolling] = useState(false);
-  const historyRef = useRef(null);
+  const historyRef  = useRef(null);
+  const audioCtxRef = useRef(null);
+
+  const getAudioCtx = () => {
+    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    return audioCtxRef.current;
+  };
+
+  const playDiceSound = (roll) => {
+    try {
+      const results = typeof roll.results === 'string' ? JSON.parse(roll.results) : roll.results;
+      const isD20   = /^1d20$/i.test((roll.expression || '').trim());
+      const key     = isD20 && results[0] === 20 ? 'nat20' : isD20 && results[0] === 1 ? 'nat1' : 'roll';
+      const src     = SOUND_FILES[key];
+      if (src) {
+        // Tente le fichier audio — si absent/bloqué, bascule sur le son procédural
+        const a = new Audio(src);
+        a.volume = 0.75;
+        a.play().catch(() => { try { PROCEDURAL[key](getAudioCtx()); } catch {} });
+      } else {
+        PROCEDURAL[key](getAudioCtx());
+      }
+    } catch { /* ignore */ }
+  };
+
+  const setExpressionPersisted = (val) => { setExpression(val); sessionStorage.setItem(storageKey, val); };
 
   useEffect(() => {
     // Fetch history
@@ -17,7 +83,7 @@ export default function DiceRoller({ sessionId }) {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(r => r.ok ? r.json() : [])
-      .then(data => setHistory(data.reverse()));
+      .then(data => setHistory(data));
   }, [sessionId]);
 
   useEffect(() => {
@@ -27,28 +93,16 @@ export default function DiceRoller({ sessionId }) {
         ...data,
         results: typeof data.results === 'string' ? JSON.parse(data.results) : data.results
       };
-      setHistory(prev => [...prev, roll]);
+      setHistory(prev => [roll, ...prev]);
       setLastResult(roll);
+      playDiceSound(roll);
       setTimeout(() => {
-        if (historyRef.current) {
-          historyRef.current.scrollTop = historyRef.current.scrollHeight;
-        }
+        if (historyRef.current) historyRef.current.scrollTop = 0;
       }, 50);
     };
     socket.on('dice-result', handler);
     return () => socket.off('dice-result', handler);
-  }, [socket]);
-
-  const parseDice = (expr) => {
-    // Parse format: NdX+M or NdX-M or NdX
-    const match = expr.trim().match(/^(\d+)?d(\d+)([+-]\d+)?$/i);
-    if (!match) return null;
-    return {
-      count: parseInt(match[1]) || 1,
-      sides: parseInt(match[2]),
-      modifier: parseInt(match[3]) || 0
-    };
-  };
+  }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rollDice = () => {
     const parsed = parseDice(expression);
@@ -94,7 +148,7 @@ export default function DiceRoller({ sessionId }) {
 
   return (
     <div className="animate-fade-in">
-      {/* Last Result Display */}
+      {/* Last Result — always on top */}
       {lastResult && (
         <div className="card" style={{
           textAlign: 'center',
@@ -132,7 +186,7 @@ export default function DiceRoller({ sessionId }) {
           <input
             type="text"
             value={expression}
-            onChange={(e) => setExpression(e.target.value)}
+            onChange={(e) => setExpressionPersisted(e.target.value)}
             placeholder="1d20, 3d6+2, 1d100..."
             onKeyDown={(e) => e.key === 'Enter' && rollDice()}
             style={{ flex: 1, fontSize: '1.1rem', fontWeight: 600, textAlign: 'center' }}
@@ -153,7 +207,7 @@ export default function DiceRoller({ sessionId }) {
             <button
               key={d.value}
               className={`btn btn-sm ${expression === d.value ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { setExpression(d.value); }}
+              onClick={() => setExpressionPersisted(d.value)}
             >
               {d.label}
             </button>
@@ -168,7 +222,7 @@ export default function DiceRoller({ sessionId }) {
         </div>
         <div
           ref={historyRef}
-          style={{ maxHeight: '300px', overflowY: 'auto', padding: 'var(--space-sm)' }}
+          style={{ maxHeight: '102px', overflowY: 'auto', padding: 'var(--space-sm)' }}
         >
           {history.length === 0 ? (
             <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-lg)' }}>

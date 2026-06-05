@@ -22,9 +22,9 @@ const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.jpe', '.bmp', '.tiff', '.tif', '.avif', '.svg'];
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
+    cb(null, allowed.includes(ext) || file.mimetype.startsWith('image/'));
   }
 });
 
@@ -43,9 +43,9 @@ const uploadToken = multer({
   storage: tokenStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.jpe', '.bmp', '.tiff', '.tif', '.avif'];
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
+    cb(null, allowed.includes(ext) || file.mimetype.startsWith('image/'));
   }
 });
 

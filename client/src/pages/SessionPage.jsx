@@ -1,30 +1,72 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
-import { useSocket } from '../contexts/SocketContext';
+import { useSocket, useSocketContext } from '../contexts/SocketContext';
 import CharacterSheet from '../components/CharacterSheet';
-import DiceRoller from '../components/DiceRoller';
 import ChatPanel from '../components/ChatPanel';
-import CombatTracker from '../components/CombatTracker';
 import MapCanvas from '../components/MapCanvas';
 import ActionLog from '../components/ActionLog';
 import Notifications from '../components/Notifications';
+import QuestTracker from '../components/QuestTracker';
+import WikiPanel from '../components/WikiPanel';
+import ProfileModal from '../components/ProfileModal';
 
 export default function SessionPage({ sessionId, onBack }) {
   const { user, token, logout } = useAuth();
+  const [showProfile, setShowProfile] = useState(false);
+  const [showChat, setShowChat] = useState(true);
   const socket = useSocket();
+  const { currentSessionRef } = useSocketContext();
   const [session, setSession] = useState(null);
   const [activeTab, setActiveTab] = useState('characters');
   const [loading, setLoading] = useState(true);
+
+  // Présence en ligne : Set<userId> des utilisateurs connectés à la session
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
 
   useEffect(() => {
     fetchSession();
   }, [sessionId]);
 
+  // Rejoindre la room socket et initialiser la présence
   useEffect(() => {
     if (socket && sessionId) {
+      currentSessionRef.current = sessionId;
       socket.emit('join-session', sessionId);
-      return () => { socket.emit('leave-session', sessionId); };
+      return () => {
+        currentSessionRef.current = null;
+        socket.emit('leave-session', sessionId);
+      };
     }
+  }, [socket, sessionId]);
+
+  // Écouter les événements de présence envoyés par le serveur
+  useEffect(() => {
+    if (!socket || !sessionId) return;
+
+    // Liste initiale des utilisateurs déjà connectés, reçue en retour du join-session
+    const onOnlineUsers = ({ userIds }) => {
+      setOnlineUsers(new Set(Array.isArray(userIds) ? userIds : []));
+    };
+
+    // Quelqu'un vient de rejoindre la session → ajouter à la liste
+    const onUserJoined = ({ id }) => {
+      setOnlineUsers(prev => new Set([...prev, id]));
+    };
+
+    // Quelqu'un a quitté la session → retirer de la liste
+    const onUserLeft = ({ id }) => {
+      setOnlineUsers(prev => { const next = new Set(prev); next.delete(id); return next; });
+    };
+
+    socket.on('online-users', onOnlineUsers);
+    socket.on('user-joined', onUserJoined);
+    socket.on('user-left', onUserLeft);
+
+    return () => {
+      socket.off('online-users', onOnlineUsers);
+      socket.off('user-joined', onUserJoined);
+      socket.off('user-left', onUserLeft);
+    };
   }, [socket, sessionId]);
 
   const fetchSession = async () => {
@@ -63,15 +105,16 @@ export default function SessionPage({ sessionId, onBack }) {
 
   const tabs = [
     { id: 'characters', icon: '📜', label: 'Personnages' },
-    { id: 'dice', icon: '🎲', label: 'Dés' },
+    { id: 'quests', icon: '🎯', label: 'Quêtes' },
     { id: 'map', icon: '🗺️', label: 'Map' },
-    { id: 'combat', icon: '⚔️', label: 'Combat' },
+    { id: 'wiki', icon: '📖', label: 'Wiki' },
     { id: 'logs', icon: '📋', label: 'Logs' },
   ];
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Notifications />
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
 
       {/* Top Navigation */}
       <nav style={{
@@ -94,7 +137,8 @@ export default function SessionPage({ sessionId, onBack }) {
               <span className={`badge ${isDM ? 'badge-dm' : 'badge-player'}`} style={{ fontSize: '0.65rem' }}>
                 {isDM ? '👑 MJ' : '⚔️ Joueur'}
               </span>
-              <span>👥 {session.members?.length || 0} membres</span>
+              {/* Compteur de présence : en ligne / total membres */}
+              <span>👥 {onlineUsers.size}/{session.members?.length || 0} en ligne</span>
               {isDM && (
                 <span
                   style={{ cursor: 'pointer' }}
@@ -109,12 +153,16 @@ export default function SessionPage({ sessionId, onBack }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>⚔️ {user.username}</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowChat(v => !v)} title={showChat ? 'Masquer le chat' : 'Afficher le chat'}>
+            {showChat ? '💬' : '💬̶'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowProfile(true)} title="Mon profil">👤</button>
           <button className="btn btn-secondary btn-sm" onClick={logout}>Décon.</button>
         </div>
       </nav>
 
       {/* Main Content */}
-      <div className="session-layout" style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="session-layout" style={{ flex: 1, overflow: 'hidden', gridTemplateColumns: showChat ? '1fr 360px' : '1fr' }}>
         {/* Tabs */}
         <div style={{
           gridColumn: '1',
@@ -135,29 +183,36 @@ export default function SessionPage({ sessionId, onBack }) {
           </div>
         </div>
 
-        {/* Tab Content */}
+        {/* Tab Content — tous les onglets restent montés pour conserver leurs états et listeners socket */}
         <div className="session-main">
-          {activeTab === 'characters' && (
+          <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
             <CharacterSheet sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'dice' && (
-            <DiceRoller sessionId={sessionId} />
-          )}
-          {activeTab === 'map' && (
+          </div>
+          <div style={{ display: activeTab === 'quests' ? 'block' : 'none', height: '100%' }}>
+            <QuestTracker sessionId={sessionId} isDM={isDM} />
+          </div>
+          <div style={{ display: activeTab === 'map' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
             <MapCanvas sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'combat' && (
-            <CombatTracker sessionId={sessionId} isDM={isDM} />
-          )}
-          {activeTab === 'logs' && (
+          </div>
+          <div style={{ display: activeTab === 'wiki' ? 'flex' : 'none', height: '100%' }}>
+            <WikiPanel sessionId={sessionId} isDM={isDM} />
+          </div>
+          <div style={{ display: activeTab === 'logs' ? 'block' : 'none', height: '100%' }}>
             <ActionLog sessionId={sessionId} />
-          )}
+          </div>
         </div>
 
-        {/* Chat Sidebar */}
-        <div className="session-sidebar">
-          <ChatPanel sessionId={sessionId} />
-        </div>
+        {/* Chat Sidebar — reçoit la présence et le rôle MJ pour les messages privés */}
+        {showChat && (
+          <div className="session-sidebar">
+            <ChatPanel
+              sessionId={sessionId}
+              isDM={isDM}
+              members={session.members || []}
+              onlineUsers={onlineUsers}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

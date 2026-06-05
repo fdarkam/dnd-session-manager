@@ -12,6 +12,8 @@ import sessionRoutes from './routes/sessions.js';
 import characterRoutes from './routes/characters.js';
 import mapRoutes from './routes/maps.js';
 import combatRoutes from './routes/combat.js';
+import questRoutes from './routes/quests.js';
+import wikiRoutes from './routes/wiki.js';
 import { setupSocket } from './socket/index.js';
 import { authMiddleware } from './middleware/auth.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,6 +50,8 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/characters', characterRoutes);
 app.use('/api/maps', mapRoutes);
 app.use('/api/combat', combatRoutes);
+app.use('/api/quests', questRoutes);
+app.use('/api/wiki', wikiRoutes);
 
 // Action logs endpoint
 app.get('/api/logs/:sessionId', authMiddleware, (req, res) => {
@@ -61,10 +65,31 @@ app.get('/api/logs/:sessionId', authMiddleware, (req, res) => {
 });
 
 // Chat history endpoint
+// Le MJ voit tous les messages (y compris les privés).
+// Un joueur ne voit que les messages publics + les privés qui lui sont destinés ou qu'il a envoyés.
 app.get('/api/chat/:sessionId', authMiddleware, (req, res) => {
   try {
-    const messages = db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 200`)
-      .all(req.params.sessionId);
+    const member = db.prepare(
+      'SELECT role FROM session_members WHERE session_id = ? AND user_id = ?'
+    ).get(req.params.sessionId, req.user.id);
+    if (!member) return res.status(403).json({ error: 'Accès refusé' });
+
+    let messages;
+    if (member.role === 'dm') {
+      // MJ : tout voir
+      messages = db.prepare(
+        'SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 200'
+      ).all(req.params.sessionId);
+    } else {
+      // Joueur : messages publics + messages privés le concernant
+      messages = db.prepare(`
+        SELECT * FROM chat_messages
+        WHERE session_id = ?
+          AND (target_user_id IS NULL OR target_user_id = ? OR user_id = ?)
+        ORDER BY created_at ASC LIMIT 200
+      `).all(req.params.sessionId, req.user.id, req.user.id);
+    }
+
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });

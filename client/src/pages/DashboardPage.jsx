@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
+import ProfileModal from '../components/ProfileModal';
 
 export default function DashboardPage({ onJoinSession }) {
   const { user, token, logout } = useAuth();
+  const [showProfile, setShowProfile] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -72,6 +74,7 @@ export default function DashboardPage({ onJoinSession }) {
 
   return (
     <div style={{ minHeight: '100vh' }}>
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
       {/* Navbar */}
       <nav style={{
         display: 'flex',
@@ -96,6 +99,7 @@ export default function DashboardPage({ onJoinSession }) {
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
             ⚔️ {user?.username}
           </span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowProfile(true)} title="Mon profil">👤 Profil</button>
           <button className="btn btn-secondary btn-sm" onClick={logout}>
             Déconnexion
           </button>
