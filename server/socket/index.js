@@ -12,6 +12,10 @@ export function setupSocket(io) {
     catch { next(new Error('Token invalide')); }
   });
 
+  // ─── Présence ──────────────────────────────────────────────────────────────
+  // Map<sessionId, Set<userId>> — qui est connecté dans chaque session
+  const sessionPresence = new Map();
+
   function isMember(sessionId, userId) {
     return !!db.prepare('SELECT id FROM session_members WHERE session_id = ? AND user_id = ?').get(sessionId, userId);
   }
@@ -23,6 +27,9 @@ export function setupSocket(io) {
   io.on('connection', (socket) => {
     console.log(`✅ ${socket.user.username} connecté`);
 
+    // Rejoindre une room personnelle pour recevoir les messages privés même si dans plusieurs onglets
+    socket.join(`user:${socket.user.id}`);
+
     // ---- Rejoindre une session ----
     socket.on('join-session', (sessionId) => {
       if (!isMember(sessionId, socket.user.id)) {
@@ -31,18 +38,25 @@ export function setupSocket(io) {
       }
       socket.join(sessionId);
       socket.sessionId = sessionId;
+
+      // Mettre à jour la présence : ajouter cet utilisateur à la session
+      if (!sessionPresence.has(sessionId)) sessionPresence.set(sessionId, new Set());
+      sessionPresence.get(sessionId).add(socket.user.id);
+
+      // Envoyer au socket rejoignant la liste des utilisateurs déjà en ligne dans cette session
+      socket.emit('online-users', { sessionId, userIds: [...sessionPresence.get(sessionId)] });
+
+      // Notifier les autres membres qu'un utilisateur vient de rejoindre
       socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id });
 
       // Envoyer l'état actuel de la map active UNIQUEMENT à ce socket (pas broadcast).
       // Déclenché à chaque join-session, y compris après reconnexion automatique.
-      // Permet à un joueur qui revient en ligne de récupérer tokens/fog/tracés sans reload.
       try {
         const activeMap = db.prepare(
           'SELECT * FROM maps WHERE session_id = ? AND is_active = 1'
         ).get(sessionId);
 
         if (activeMap) {
-          // Parser fog_data (format { cells:[], gs:40 })
           let fogCells = [];
           let gridSize = 40;
           try {
@@ -69,6 +83,12 @@ export function setupSocket(io) {
 
     socket.on('leave-session', (sessionId) => {
       socket.leave(sessionId);
+      // Retirer de la présence si le joueur quitte explicitement
+      const users = sessionPresence.get(sessionId);
+      if (users) {
+        users.delete(socket.user.id);
+        if (users.size === 0) sessionPresence.delete(sessionId);
+      }
       socket.to(sessionId).emit('user-left', { username: socket.user.username, id: socket.user.id });
     });
 
@@ -94,17 +114,33 @@ export function setupSocket(io) {
 
     // ---- Chat ----
     socket.on('chat-message', (data) => {
-      const { sessionId, content } = data;
+      const { sessionId, content, targetUserId } = data;
       if (!isMember(sessionId, socket.user.id)) return;
+
       const msg = {
         id: uuidv4(), session_id: sessionId, user_id: socket.user.id,
-        username: socket.user.username, content, created_at: new Date().toISOString()
+        username: socket.user.username, content,
+        target_user_id: targetUserId || null,
+        created_at: new Date().toISOString()
       };
+
+      // Persister en DB (target_user_id stocké pour filtrage côté GET /api/chat)
       try {
-        db.prepare('INSERT INTO chat_messages (id, session_id, user_id, username, content) VALUES (?, ?, ?, ?, ?)')
-          .run(msg.id, msg.session_id, msg.user_id, msg.username, msg.content);
+        db.prepare(
+          'INSERT INTO chat_messages (id, session_id, user_id, username, content, target_user_id) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(msg.id, msg.session_id, msg.user_id, msg.username, msg.content, msg.target_user_id);
       } catch {}
-      io.to(sessionId).emit('chat-message', msg);
+
+      if (targetUserId) {
+        // Message privé MJ → joueur ciblé :
+        //   - envoyer à la room personnelle du joueur (gère les onglets multiples)
+        //   - renvoyer en retour au MJ pour qu'il voie son propre message
+        io.to(`user:${targetUserId}`).emit('chat-message', msg);
+        socket.emit('chat-message', msg);
+      } else {
+        // Message public : diffuser à toute la session
+        io.to(sessionId).emit('chat-message', msg);
+      }
     });
 
     // ---- Token : ajout ----
@@ -114,7 +150,6 @@ export function setupSocket(io) {
       try {
         let tokens;
         if (Array.isArray(allTokens)) {
-          // Le client envoie sa liste complète — évite une lecture DB en concurrence
           tokens = allTokens;
         } else {
           const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
@@ -246,7 +281,7 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-grid-size', { mapId, gridSize });
     });
 
-    // ---- Image de fond : suppression (touche Suppr en mode map-edit) ----
+    // ---- Image de fond : suppression ----
     socket.on('map-image-clear', (data) => {
       const { sessionId, mapId } = data;
       if (!isDM(sessionId, socket.user.id)) return;
@@ -320,7 +355,13 @@ export function setupSocket(io) {
     });
 
     socket.on('disconnect', () => {
+      // Nettoyer la présence de cet utilisateur dans sa session
       if (socket.sessionId) {
+        const users = sessionPresence.get(socket.sessionId);
+        if (users) {
+          users.delete(socket.user.id);
+          if (users.size === 0) sessionPresence.delete(socket.sessionId);
+        }
         socket.to(socket.sessionId).emit('user-left', {
           username: socket.user.username, id: socket.user.id
         });
