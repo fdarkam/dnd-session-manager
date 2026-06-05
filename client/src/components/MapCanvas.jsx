@@ -69,17 +69,19 @@ function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
 }
 
 // ─── Token edit panel ─────────────────────────────────────────────────────────
-function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
+function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
   const { token: authToken } = useAuth();
   const [name, setName] = useState(token.name || '');
   const [color, setColor] = useState(token.color || '#c9a84c');
   const [borderColor, setBorderColor] = useState(token.borderColor || '#ffffff');
   const [radius, setRadius] = useState(token.radius || 22);
   const [image, setImage] = useState(token.image || null);
+  const [hidden, setHidden] = useState(!!token.hidden);
+  const [locked, setLocked] = useState(!!token.locked);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
-  useEffect(() => { setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff'); setRadius(token.radius || 22); setImage(token.image || null); }, [token.id]);
+  useEffect(() => { setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff'); setRadius(token.radius || 22); setImage(token.image || null); setHidden(!!token.hidden); setLocked(!!token.locked); }, [token.id]);
 
   const handleFile = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -91,7 +93,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
     } catch { /* ignore upload errors */ }
     setUploading(false);
   };
-  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image });
+  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked });
 
   return (
     <div style={{ position: 'absolute', right: 8, top: 8, width: 215, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
@@ -118,6 +120,20 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
           <button className="btn btn-primary btn-sm" onClick={apply} style={{ flex: 1, fontSize: '0.8rem' }}>Appliquer</button>
           <button className="btn btn-danger btn-sm" onClick={onDelete} title="Supprimer (Suppr)">🗑️</button>
         </div>
+        {isDM && (
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <button
+              className={`btn btn-sm ${hidden ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked }); }}
+              style={{ flex: 1, fontSize: '0.73rem' }}
+            >{hidden ? '👁️ Révéler' : '🙈 Masquer'}</button>
+            <button
+              className={`btn btn-sm ${locked ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next }); }}
+              style={{ flex: 1, fontSize: '0.73rem' }}
+            >{locked ? '🔓 Déverr.' : '🔒 Verr.'}</button>
+          </div>
+        )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
       </div>
     </div>
@@ -331,6 +347,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       const r = clamp(t.radius || 22, 10, 120);
       const sel = selectedTokenRef.current?.id === t.id;
 
+      if (t.hidden) ctx.globalAlpha = 0.5;
+
       if (sel) {
         ctx.beginPath(); ctx.arc(vx, vy, r + 6 / z, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(250,204,21,0.35)'; ctx.lineWidth = 6 / z; ctx.stroke();
@@ -365,6 +383,21 @@ export default function MapCanvas({ sessionId, isDM }) {
         ctx.fillStyle = '#facc15'; ctx.fill();
         ctx.strokeStyle = '#000'; ctx.lineWidth = 1 / z; ctx.stroke();
       }
+
+      // Padlock icon for locked tokens (top-right corner)
+      if (t.locked) {
+        const lx = vx + r * 0.62, ly = vy - r * 0.62;
+        const bw = 7 / z, bh = 5 / z;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(lx - bw / 2 - 1 / z, ly - 1 / z, bw + 2 / z, bh + 2 / z);
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(lx - bw / 2, ly, bw, bh);
+        ctx.beginPath();
+        ctx.arc(lx, ly, bw / 2, Math.PI, 0);
+        ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2 / z; ctx.stroke();
+      }
+
+      if (t.hidden) ctx.globalAlpha = 1;
     });
 
     // Fog cells
@@ -880,7 +913,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       return;
     }
     if (isPanningRef.current) { const np = { x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y }; panOffsetRef.current = np; drawFrame(); return; }
-    if (isDraggingRef.current) {
+    if (isDraggingRef.current && !isDraggingRef.current.locked) {
       dragMoved.current = true;
       const sp = snapPos(pos.x, pos.y);
       const upd = tokensRef.current.map(t => t.id === isDraggingRef.current.id ? { ...t, ...sp } : t);
@@ -1173,7 +1206,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         />
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
-        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
+        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
       </div>
     </div>
   );

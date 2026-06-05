@@ -24,6 +24,22 @@ export function setupSocket(io) {
     return m?.role === 'dm';
   }
 
+  // Émet map-token-update vers chaque socket de la session avec filtrage des tokens cachés.
+  // excludeSocketId: socket à ignorer (l'émetteur lors des déplacements live).
+  function broadcastTokens(sessionId, mapId, allTokens, live, excludeSocketId) {
+    const room = io.sockets.adapter.rooms.get(sessionId);
+    if (!room) return;
+    for (const socketId of room) {
+      if (excludeSocketId && socketId === excludeSocketId) continue;
+      const s = io.sockets.sockets.get(socketId);
+      if (!s) continue;
+      const tokens = isDM(sessionId, s.user.id)
+        ? allTokens
+        : allTokens.filter(t => !t.hidden);
+      s.emit('map-token-update', { mapId, tokens, live });
+    }
+  }
+
   io.on('connection', (socket) => {
     console.log(`✅ ${socket.user.username} connecté`);
 
@@ -65,9 +81,13 @@ export function setupSocket(io) {
             gridSize = Array.isArray(raw) ? 40 : (raw.gs || 40);
           } catch {}
 
+          const allMapTokens = JSON.parse(activeMap.tokens || '[]');
+          const syncTokens = isDM(sessionId, socket.user.id)
+            ? allMapTokens
+            : allMapTokens.filter(t => !t.hidden);
           socket.emit('map-sync', {
             mapId:    activeMap.id,
-            tokens:   JSON.parse(activeMap.tokens   || '[]'),
+            tokens:   syncTokens,
             drawings: JSON.parse(activeMap.drawings  || '[]'),
             fogCells,
             gridSize,
@@ -158,7 +178,7 @@ export function setupSocket(io) {
           if (idx >= 0) tokens[idx] = newToken; else tokens.push(newToken);
         }
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
-        io.to(sessionId).emit('map-token-update', { mapId, tokens });
+        broadcastTokens(sessionId, mapId, tokens, false, null);
       } catch (err) { console.error('DB token-add error:', err); }
     });
 
@@ -170,7 +190,7 @@ export function setupSocket(io) {
         try { db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId); }
         catch (err) { console.error('DB token-move error:', err); }
       }
-      socket.to(sessionId).emit('map-token-update', { mapId, tokens, live });
+      broadcastTokens(sessionId, mapId, tokens, live, socket.id);
     });
 
     // ---- Token : suppression ----
@@ -181,7 +201,7 @@ export function setupSocket(io) {
         const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
         const tokens = JSON.parse(map?.tokens || '[]').filter(t => t.id !== tokenId);
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
-        io.to(sessionId).emit('map-token-update', { mapId, tokens });
+        broadcastTokens(sessionId, mapId, tokens, false, null);
       } catch (err) { console.error('DB token-delete error:', err); }
     });
 
