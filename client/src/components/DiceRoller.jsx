@@ -33,9 +33,7 @@ export default function DiceRoller({ sessionId }) {
       setHistory(prev => [roll, ...prev]);
       setLastResult(roll);
       setTimeout(() => {
-        if (historyRef.current) {
-          historyRef.current.scrollTop = historyRef.current.scrollHeight;
-        }
+        if (historyRef.current) historyRef.current.scrollTop = 0;
       }, 50);
     };
     socket.on('dice-result', handler);
@@ -171,7 +169,7 @@ export default function DiceRoller({ sessionId }) {
         </div>
         <div
           ref={historyRef}
-          style={{ maxHeight: '300px', overflowY: 'auto', padding: 'var(--space-sm)' }}
+          style={{ maxHeight: '102px', overflowY: 'auto', padding: 'var(--space-sm)' }}
         >
           {history.length === 0 ? (
             <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-lg)' }}>

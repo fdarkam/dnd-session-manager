@@ -773,6 +773,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       const sp=snapPos(pos.x,pos.y);
       const upd=tokensRef.current.map(t=>t.id===isDraggingRef.current.id?{...t,...sp}:t);
       tokensRef.current=upd; setTokens(upd);
+      tokenVisualsRef.current[isDraggingRef.current.id]=sp; // sync visual so drawFrame shows local movement
       if (selectedTokenRef.current?.id===isDraggingRef.current.id) { const mv=upd.find(t=>t.id===isDraggingRef.current.id); selectedTokenRef.current=mv; setSelectedToken(mv); }
       drawFrame();
       // ← Token drag emit at ~60fps (live=true → no DB write, triggers lerp on receivers)
@@ -827,11 +828,18 @@ export default function MapCanvas({ sessionId, isDM }) {
     setDrawing(false); setIsPanning(false); setDragging(null); drawFrame();
   };
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const nz=clamp(zoomRef.current+(e.deltaY>0?-0.1:0.1),0.2,4);
-    zoomRef.current=nz; setZoom(nz); drawFrame();
-  };
+  // Wheel zoom — must be non-passive to allow preventDefault
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const nz=clamp(zoomRef.current+(e.deltaY>0?-0.1:0.1),0.2,4);
+      zoomRef.current=nz; setZoom(nz); drawFrame();
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [drawFrame]);
 
   const updateToken = (upd) => {
     const next=tokensRef.current.map(t=>t.id===upd.id?upd:t);
@@ -985,7 +993,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       <div ref={containerRef} style={{flex:1,minHeight:'400px',position:'relative',borderRadius:'var(--radius-md)',overflow:'hidden',border:'1px solid var(--border-color)',cursor:getCursor()}}>
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel}
+          onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           onContextMenu={e=>e.preventDefault()}
           style={{width:'100%',height:'100%',display:'block'}}
         />
