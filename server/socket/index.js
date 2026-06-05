@@ -63,15 +63,22 @@ export function setupSocket(io) {
       io.to(sessionId).emit('chat-message', msg);
     });
 
-    // ---- Token: ADD single token (server-side merge — never deletes others' tokens) ----
+    // ---- Token: ADD single token ----
     socket.on('map-token-add', (data) => {
-      const { sessionId, mapId, token: newToken } = data;
+      const { sessionId, mapId, token: newToken, allTokens } = data;
       if (!isMember(sessionId, socket.user.id)) return;
       try {
-        const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
-        const tokens = JSON.parse(map?.tokens || '[]');
-        const idx = tokens.findIndex(t => t.id === newToken.id);
-        if (idx >= 0) tokens[idx] = newToken; else tokens.push(newToken);
+        let tokens;
+        if (Array.isArray(allTokens)) {
+          // Client sends its full current list — use it directly (avoids DB read race)
+          tokens = allTokens;
+        } else {
+          // Fallback: merge new token into DB state
+          const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
+          tokens = JSON.parse(map?.tokens || '[]');
+          const idx = tokens.findIndex(t => t.id === newToken.id);
+          if (idx >= 0) tokens[idx] = newToken; else tokens.push(newToken);
+        }
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
         io.to(sessionId).emit('map-token-update', { mapId, tokens });
       } catch (err) { console.error('DB token-add error:', err); }
@@ -189,7 +196,14 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-deleted', { mapId });
     });
 
-    // ---- Fog of war ----
+    // ---- Fog of war — live preview (no DB, same pattern as map-drawing-live) ----
+    socket.on('map-fog-live', (data) => {
+      const { sessionId, mapId, fogCells, gridSize } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
+      socket.to(sessionId).emit('map-fog-live', { mapId, fogCells, gridSize });
+    });
+
+    // ---- Fog of war — final save ----
     socket.on('map-fog-paint', (data) => {
       const { sessionId, mapId, fogCells, gridSize } = data;
       if (!isDM(sessionId, socket.user.id)) return;

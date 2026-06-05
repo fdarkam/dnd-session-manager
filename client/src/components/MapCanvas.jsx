@@ -139,6 +139,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const lastDragEmit   = useRef(0);
   const lastCursorEmit = useRef(0);
   const lastDrawEmit   = useRef(0);
+  const lastFogEmit    = useRef(0);
   const pingAnimRef    = useRef([]);
   const lerpAnimRef    = useRef(null);
   const tokenLastClickRef = useRef({ id: null, time: 0 });
@@ -215,7 +216,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [newTokenImage, setNewTokenImage] = useState(null);
 
   // ── Keep refs in sync with state ──
-  useEffect(() => { tokensRef.current = tokens; }, [tokens]);
+  useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
   useEffect(() => { pathsRef.current = paths; }, [paths]);
   useEffect(() => { panOffsetRef.current = panOffset; }, [panOffset]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
@@ -503,12 +504,19 @@ export default function MapCanvas({ sessionId, isDM }) {
       fogCellsRef.current=s; setFogCells(s);
       if (gs) { gridSizeRef.current=gs; setGridSize(gs); }
     };
+    // Live fog preview while DM is painting (no DB write — same as map-drawing-live)
+    const onFogLive = ({ mapId, fogCells: cells, gridSize: gs }) => {
+      if (mapId !== activeMapRef.current?.id) return;
+      const s=new Set(Array.isArray(cells)?cells:[]);
+      fogCellsRef.current=s; setFogCells(s);
+      if (gs) { gridSizeRef.current=gs; setGridSize(gs); }
+    };
     const onImageUpdated = ({ mapId, img_x, img_y, img_scale }) => {
       if (mapId !== activeMapRef.current?.id) return;
       setImgX(img_x); setImgY(img_y); setImgScale(img_scale);
     };
     const onMapDeleted = ({ mapId }) => {
-      setMaps(prev => { const next=prev.filter(m=>m.id!==mapId); if (activeMapRef.current?.id===mapId&&next[0]) setActiveMap(next[0]); return next; });
+      setMaps(prev => { const next=prev.filter(m=>m.id!==mapId); if (activeMapRef.current?.id===mapId) setActiveMap(next[0]||null); return next; });
     };
     const onMapListUpdated = () => { fetchMapsRef.current?.(); };
     const onCursorUpdate = ({ userId, username, x, y }) => {
@@ -529,6 +537,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-drawings-cleared', onDrawingsCleared);
     socket.on('map-changed', onMapChanged);
     socket.on('map-fog-update', onFogUpdate);
+    socket.on('map-fog-live', onFogLive);
     socket.on('map-image-updated', onImageUpdated);
     socket.on('map-deleted', onMapDeleted);
     socket.on('cursor-update', onCursorUpdate);
@@ -544,6 +553,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-drawings-cleared', onDrawingsCleared);
       socket.off('map-changed', onMapChanged);
       socket.off('map-fog-update', onFogUpdate);
+      socket.off('map-fog-live', onFogLive);
       socket.off('map-image-updated', onImageUpdated);
       socket.off('map-deleted', onMapDeleted);
       socket.off('cursor-update', onCursorUpdate);
@@ -553,7 +563,16 @@ export default function MapCanvas({ sessionId, isDM }) {
 
   // Load map when active changes
   useEffect(() => {
-    if (!activeMap) return;
+    if (!activeMap) {
+      // All maps deleted — clear canvas to empty grid
+      mapImageRef.current=null; setMapImage(null);
+      tokensRef.current=[]; setTokens([]);
+      pathsRef.current=[]; setPaths([]);
+      fogCellsRef.current=new Set(); setFogCells(new Set());
+      livePathsRef.current={};
+      drawFrame();
+      return;
+    }
     const io=new Image();
     io.src=`${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
     io.onload=()=>{mapImageRef.current=io;setMapImage(io);};
@@ -564,7 +583,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     pathsRef.current=pths; setPaths(pths);
     livePathsRef.current={};
     loadFog(activeMap); loadImgTransform(activeMap);
-  }, [activeMap]);
+  }, [activeMap, drawFrame]);
 
   const loadFog = (map) => {
     try {
@@ -586,7 +605,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (res.ok) {
       const data=await res.json(); setMaps(data);
       if (!activeMapRef.current||!data.find(m=>m.id===activeMapRef.current.id)) {
-        const a=data.find(m=>m.is_active)||data[0]; if (a) setActiveMap(a);
+        const a=data.find(m=>m.is_active)||data[0];
+        setActiveMap(a||null); // null clears map when all maps deleted
       }
     }
   }, [sessionId, token]);
@@ -688,7 +708,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       const sp=snapPos(pos.x,pos.y);
       const tok={id:`tok_${Date.now()}_${Math.random().toString(36).slice(2)}`,name:newTokenName,color:newTokenColor,borderColor:newTokenBorderColor,radius:clamp(newTokenRadius,10,80),image:newTokenImage,x:sp.x,y:sp.y};
       const upd=[...tokensRef.current,tok]; tokensRef.current=upd; setTokens(upd); drawFrame();
-      if (socket) socket.emit('map-token-add',{sessionId,mapId:activeMapRef.current?.id,token:tok});
+      if (socket) socket.emit('map-token-add',{sessionId,mapId:activeMapRef.current?.id,token:tok,allTokens:upd});
       return;
     }
     if (toolRef.current==='move') {
@@ -736,7 +756,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
       drawFrame(); return;
     }
-    if (fogPainting.current&&isDM) { paintFog(pos.x,pos.y,toolRef.current==='fog-add'); return; }
+    if (fogPainting.current&&isDM) {
+      paintFog(pos.x,pos.y,toolRef.current==='fog-add');
+      if (socket&&now-lastFogEmit.current>100) {
+        lastFogEmit.current=now;
+        socket.emit('map-fog-live',{sessionId,mapId:activeMapRef.current?.id,fogCells:Array.from(fogCellsRef.current),gridSize:gridSizeRef.current});
+      }
+      return;
+    }
     if (eraserActive.current&&isDM) {
       const r=eraserSize/zoomRef.current;
       const ids=pathsRef.current.filter(p=>p.points?.some(pt=>{const dx=pt.x-pos.x,dy=pt.y-pos.y;return dx*dx+dy*dy<r*r;})).map(p=>p.id);
@@ -772,9 +799,9 @@ export default function MapCanvas({ sessionId, isDM }) {
       dragMoved.current=true;
       const sp=snapPos(pos.x,pos.y);
       const upd=tokensRef.current.map(t=>t.id===isDraggingRef.current.id?{...t,...sp}:t);
-      tokensRef.current=upd; setTokens(upd);
+      tokensRef.current=upd; // no setTokens during drag — avoids React re-renders at 60fps
       tokenVisualsRef.current[isDraggingRef.current.id]=sp; // sync visual so drawFrame shows local movement
-      if (selectedTokenRef.current?.id===isDraggingRef.current.id) { const mv=upd.find(t=>t.id===isDraggingRef.current.id); selectedTokenRef.current=mv; setSelectedToken(mv); }
+      if (selectedTokenRef.current?.id===isDraggingRef.current.id) { const mv=upd.find(t=>t.id===isDraggingRef.current.id); selectedTokenRef.current=mv; } // no setSelectedToken in hot path
       drawFrame();
       // ← Token drag emit at ~60fps (live=true → no DB write, triggers lerp on receivers)
       if (socket&&now-lastDragEmit.current>16) {
@@ -814,6 +841,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (wasDragging&&dragMoved.current&&socket) {
       const mv=tokensRef.current.find(t=>t.id===wasDragging.id);
       if (mv) { selectedTokenRef.current=mv; setSelectedToken(mv); }
+      setTokens([...tokensRef.current]); // sync React state once after drag (not per-frame)
       socket.emit('map-token-move',{sessionId,mapId:activeMapRef.current?.id,tokens:tokensRef.current,live:false});
     }
     // Single click (no drag) → detect double-click to open edit panel
