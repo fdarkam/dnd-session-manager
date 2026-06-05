@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth, API } from '../contexts/AuthContext';
+import { parseDice } from '../utils/dice';
 
 // ─── Sound configuration — placez vos fichiers dans client/public/sounds/ ────
 //     Laissez vide ('') pour utiliser le son procédural généré automatiquement.
@@ -102,17 +103,6 @@ export default function DiceRoller({ sessionId }) {
     socket.on('dice-result', handler);
     return () => socket.off('dice-result', handler);
   }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const parseDice = (expr) => {
-    // Parse format: NdX+M or NdX-M or NdX
-    const match = expr.trim().match(/^(\d+)?d(\d+)([+-]\d+)?$/i);
-    if (!match) return null;
-    return {
-      count: parseInt(match[1]) || 1,
-      sides: parseInt(match[2]),
-      modifier: parseInt(match[3]) || 0
-    };
-  };
 
   const rollDice = () => {
     const parsed = parseDice(expression);

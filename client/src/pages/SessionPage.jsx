@@ -20,10 +20,14 @@ export default function SessionPage({ sessionId, onBack }) {
   const [activeTab, setActiveTab] = useState('characters');
   const [loading, setLoading] = useState(true);
 
+  // Présence en ligne : Set<userId> des utilisateurs connectés à la session
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
+
   useEffect(() => {
     fetchSession();
   }, [sessionId]);
 
+  // Rejoindre la room socket et initialiser la présence
   useEffect(() => {
     if (socket && sessionId) {
       currentSessionRef.current = sessionId;
@@ -33,6 +37,36 @@ export default function SessionPage({ sessionId, onBack }) {
         socket.emit('leave-session', sessionId);
       };
     }
+  }, [socket, sessionId]);
+
+  // Écouter les événements de présence envoyés par le serveur
+  useEffect(() => {
+    if (!socket || !sessionId) return;
+
+    // Liste initiale des utilisateurs déjà connectés, reçue en retour du join-session
+    const onOnlineUsers = ({ userIds }) => {
+      setOnlineUsers(new Set(Array.isArray(userIds) ? userIds : []));
+    };
+
+    // Quelqu'un vient de rejoindre la session → ajouter à la liste
+    const onUserJoined = ({ id }) => {
+      setOnlineUsers(prev => new Set([...prev, id]));
+    };
+
+    // Quelqu'un a quitté la session → retirer de la liste
+    const onUserLeft = ({ id }) => {
+      setOnlineUsers(prev => { const next = new Set(prev); next.delete(id); return next; });
+    };
+
+    socket.on('online-users', onOnlineUsers);
+    socket.on('user-joined', onUserJoined);
+    socket.on('user-left', onUserLeft);
+
+    return () => {
+      socket.off('online-users', onOnlineUsers);
+      socket.off('user-joined', onUserJoined);
+      socket.off('user-left', onUserLeft);
+    };
   }, [socket, sessionId]);
 
   const fetchSession = async () => {
@@ -103,7 +137,8 @@ export default function SessionPage({ sessionId, onBack }) {
               <span className={`badge ${isDM ? 'badge-dm' : 'badge-player'}`} style={{ fontSize: '0.65rem' }}>
                 {isDM ? '👑 MJ' : '⚔️ Joueur'}
               </span>
-              <span>👥 {session.members?.length || 0} membres</span>
+              {/* Compteur de présence : en ligne / total membres */}
+              <span>👥 {onlineUsers.size}/{session.members?.length || 0} en ligne</span>
               {isDM && (
                 <span
                   style={{ cursor: 'pointer' }}
@@ -148,7 +183,7 @@ export default function SessionPage({ sessionId, onBack }) {
           </div>
         </div>
 
-        {/* Tab Content — all tabs stay mounted to preserve state and socket listeners */}
+        {/* Tab Content — tous les onglets restent montés pour conserver leurs états et listeners socket */}
         <div className="session-main">
           <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
             <CharacterSheet sessionId={sessionId} isDM={isDM} />
@@ -167,10 +202,15 @@ export default function SessionPage({ sessionId, onBack }) {
           </div>
         </div>
 
-        {/* Chat Sidebar */}
+        {/* Chat Sidebar — reçoit la présence et le rôle MJ pour les messages privés */}
         {showChat && (
           <div className="session-sidebar">
-            <ChatPanel sessionId={sessionId} />
+            <ChatPanel
+              sessionId={sessionId}
+              isDM={isDM}
+              members={session.members || []}
+              onlineUsers={onlineUsers}
+            />
           </div>
         )}
       </div>
