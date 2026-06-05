@@ -154,6 +154,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const tokensRef        = useRef([]);
   const tokenVisualsRef  = useRef({});   // interpolated display positions per token id
   const tokenLerpsRef    = useRef({});   // active lerp jobs { fromX,fromY,toX,toY,startTime,duration }
+  const cursorVisualsRef = useRef({});   // interpolated cursor positions { userId: {x,y} }
+  const cursorLerpsRef   = useRef({});   // cursor lerp jobs (same shape as tokenLerpsRef)
   const pathsRef         = useRef([]);
   const livePathsRef     = useRef({});   // other users' in-progress strokes { pathId: {color,width,points[]} }
   const currentPathRef   = useRef([]);
@@ -204,6 +206,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [isPanning, setIsPanning] = useState(false);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null); // { type: 'token'|'map-image', id? }
   const [zoom, setZoom]           = useState(1);
   const [selectedToken, setSelectedToken] = useState(null);
   const [showTokenEdit, setShowTokenEdit] = useState(false);
@@ -373,25 +376,40 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
     }
 
-    // Other players' cursors
+    // Other players' cursors — lerped positions, hidden in fog for non-DM
     Object.values(otherCursorsRef.current).forEach(c => {
+      const vis = cursorVisualsRef.current[c.userId];
+      const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
+      // Players cannot see cursors hidden behind fog
+      if (!dm) {
+        const cellKey=`${Math.floor(cx/gs)},${Math.floor(cy/gs)}`;
+        if (fc.has(cellKey)) return;
+      }
       const col=userColor(c.userId);
       ctx.fillStyle=col;
-      ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(c.x+12/z,c.y+4/z); ctx.lineTo(c.x+4/z,c.y+12/z); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+12/z,cy+4/z); ctx.lineTo(cx+4/z,cy+12/z); ctx.closePath(); ctx.fill();
       ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=0.5/z; ctx.stroke();
       ctx.fillStyle=col; ctx.font=`bold ${9/z}px Inter,sans-serif`; ctx.textAlign='left'; ctx.textBaseline='top';
-      ctx.fillText(c.username,c.x+14/z,c.y+4/z);
+      ctx.fillText(c.username,cx+14/z,cy+4/z);
     });
 
-    // Ping animations
+    // Ping animations — ease-out with 3 rings + impact dot
     const now=Date.now();
-    pingAnimRef.current=pingAnimRef.current.filter(p=>now-p.ts<2500);
+    pingAnimRef.current=pingAnimRef.current.filter(p=>now-p.ts<2000);
     pingAnimRef.current.forEach(p=>{
-      const age=(now-p.ts)/2500;
-      ctx.strokeStyle=`rgba(250,204,21,${1-age})`;
-      ctx.lineWidth=3/z;
-      ctx.beginPath(); ctx.arc(p.x,p.y,(10+age*40)/z,0,Math.PI*2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(p.x,p.y,(5+age*20)/z,0,Math.PI*2); ctx.stroke();
+      const age=(now-p.ts)/2000;
+      const ease=1-Math.pow(1-age,2); // ease-out
+      // Outer ring
+      ctx.strokeStyle=`rgba(250,204,21,${(1-age)*0.6})`; ctx.lineWidth=2/z;
+      ctx.beginPath(); ctx.arc(p.x,p.y,(22+ease*65)/z,0,Math.PI*2); ctx.stroke();
+      // Middle ring
+      ctx.strokeStyle=`rgba(250,204,21,${(1-age)*0.85})`; ctx.lineWidth=3/z;
+      ctx.beginPath(); ctx.arc(p.x,p.y,(12+ease*38)/z,0,Math.PI*2); ctx.stroke();
+      // Inner ring
+      ctx.strokeStyle=`rgba(255,255,255,${(1-age)*0.7})`; ctx.lineWidth=1.5/z;
+      ctx.beginPath(); ctx.arc(p.x,p.y,(6+ease*18)/z,0,Math.PI*2); ctx.stroke();
+      // Impact dot (first 25% of animation)
+      if (age<0.25) { const ia=age/0.25; ctx.beginPath(); ctx.arc(p.x,p.y,(7*(1-ia))/z,0,Math.PI*2); ctx.fillStyle=`rgba(250,204,21,${1-ia})`; ctx.fill(); }
     });
     if (pingAnimRef.current.length>0) requestAnimationFrame(drawFrame);
 
@@ -409,6 +427,13 @@ export default function MapCanvas({ sessionId, isDM }) {
         tokenVisualsRef.current[id] = { x: lerp(tgt.fromX, tgt.toX, t), y: lerp(tgt.fromY, tgt.toY, t) };
         if (t < 1) active = true;
         else delete tokenLerpsRef.current[id];
+      });
+      // Cursor lerp — same pattern as tokens
+      Object.entries(cursorLerpsRef.current).forEach(([uid, tgt]) => {
+        const t = Math.min((now - tgt.startTime) / tgt.duration, 1);
+        cursorVisualsRef.current[uid] = { x: lerp(tgt.fromX, tgt.toX, t), y: lerp(tgt.fromY, tgt.toY, t) };
+        if (t < 1) active = true;
+        else delete cursorLerpsRef.current[uid];
       });
       drawFrame();
       lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
@@ -433,14 +458,16 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (e.key!=='Delete'&&e.key!=='Backspace') return;
       const a=document.activeElement;
       if (a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return;
-      // Map-edit mode: Delete clears the background image
+      // Map-edit mode: Delete clears the background image (with confirmation)
       if (toolRef.current==='map-edit'&&isDMRef.current&&mapImageRef.current) {
         e.preventDefault();
-        mapImageRef.current=null; setMapImage(null); drawFrame();
-        if (socket&&activeMapRef.current) socket.emit('map-image-clear',{sessionId,mapId:activeMapRef.current.id});
+        setPendingDelete({ type: 'map-image' });
         return;
       }
-      if (selectedTokenRef.current) { e.preventDefault(); deleteToken(selectedTokenRef.current.id); }
+      if (selectedTokenRef.current) {
+        e.preventDefault();
+        setPendingDelete({ type: 'token', id: selectedTokenRef.current.id, name: selectedTokenRef.current.name });
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -527,8 +554,10 @@ export default function MapCanvas({ sessionId, isDM }) {
     };
     const onMapListUpdated = () => { fetchMapsRef.current?.(); };
     const onCursorUpdate = ({ userId, username, x, y }) => {
+      const vis = cursorVisualsRef.current[userId] || { x, y };
+      cursorLerpsRef.current[userId] = { fromX: vis.x, fromY: vis.y, toX: x, toY: y, startTime: Date.now(), duration: 100 };
       otherCursorsRef.current = { ...otherCursorsRef.current, [userId]: { userId, username, x, y } };
-      drawFrame();
+      startLerpAnimation();
     };
     const onPing = ({ x, y }) => {
       pingAnimRef.current = [...pingAnimRef.current, { x, y, ts: Date.now() }];
@@ -907,8 +936,17 @@ export default function MapCanvas({ sessionId, isDM }) {
   };
   const deleteToken = (id) => {
     const next=tokensRef.current.filter(t=>t.id!==id);
-    tokensRef.current=next; setTokens(next); selectedTokenRef.current=null; setSelectedToken(null); drawFrame();
+    tokensRef.current=next; setTokens(next); selectedTokenRef.current=null; setSelectedToken(null); setShowTokenEdit(false); drawFrame();
     if (socket) socket.emit('map-token-delete',{sessionId,mapId:activeMapRef.current?.id,tokenId:id});
+  };
+  const confirmPendingDelete = () => {
+    const p = pendingDelete; setPendingDelete(null);
+    if (!p) return;
+    if (p.type === 'token') { deleteToken(p.id); }
+    else if (p.type === 'map-image') {
+      mapImageRef.current=null; setMapImage(null); drawFrame();
+      if (socket&&activeMapRef.current) socket.emit('map-image-clear',{sessionId,mapId:activeMapRef.current.id});
+    }
   };
   const clearFog = () => {
     const e=new Set(); fogCellsRef.current=e; setFogCells(e); drawFrame();
@@ -1052,6 +1090,27 @@ export default function MapCanvas({ sessionId, isDM }) {
         <span style={{fontSize:'0.65rem',color:'var(--text-muted)'}} title="Clic droit = Ping">📌</span>
       </div>
 
+      {/* Token / image-clear confirmation modal */}
+      {pendingDelete&&(
+        <div style={{position:'fixed',inset:0,zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(6px)',background:'rgba(0,0,0,0.55)'}} onClick={()=>setPendingDelete(null)}>
+          <div style={{background:'var(--bg-secondary)',border:'1px solid var(--accent-danger)',borderRadius:'var(--radius-lg)',padding:'28px 32px',minWidth:'280px',boxShadow:'0 16px 48px rgba(0,0,0,0.8)',textAlign:'center'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:'2rem',marginBottom:'10px'}}>{pendingDelete.type==='token'?'🗑️':'🖼️'}</div>
+            <h3 style={{fontFamily:'var(--font-heading)',color:'var(--accent-danger)',marginBottom:'8px'}}>
+              {pendingDelete.type==='token'?'Supprimer le token':'Effacer l\'image'}
+            </h3>
+            <p style={{color:'var(--text-secondary)',marginBottom:'24px',fontSize:'0.9rem'}}>
+              {pendingDelete.type==='token'
+                ? <>Supprimer <strong style={{color:'var(--text-primary)'}}>{pendingDelete.name||'ce token'}</strong>&nbsp;?</>
+                : 'Effacer l\'image de fond de la map définitivement ?'}
+            </p>
+            <div style={{display:'flex',gap:'10px',justifyContent:'center'}}>
+              <button className="btn btn-secondary" onClick={()=>setPendingDelete(null)}>Annuler</button>
+              <button className="btn btn-danger" onClick={confirmPendingDelete}>Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete map confirmation modal */}
       {showDeleteConfirm&&(
         <div style={{position:'fixed',inset:0,zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(6px)',background:'rgba(0,0,0,0.55)'}} onClick={()=>setShowDeleteConfirm(false)}>
@@ -1079,7 +1138,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         />
         {showDice&&<FloatingPanel title="🎲 Dés" defaultPos={{x:16,y:16}} defaultSize={{w:300,h:480}} onClose={()=>setShowDice(false)}><DiceRoller sessionId={sessionId}/></FloatingPanel>}
         {showCombat&&<FloatingPanel title="⚔️ Combat" defaultPos={{x:16,y:showDice?450:16}} defaultSize={{w:340,h:540}} onClose={()=>setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM}/></FloatingPanel>}
-        {selectedToken&&showTokenEdit&&<TokenEditPanel token={selectedToken} onUpdate={updateToken} onDelete={()=>deleteToken(selectedToken.id)} onClose={()=>{setSelectedToken(null);selectedTokenRef.current=null;setShowTokenEdit(false);drawFrame();}}/>}
+        {selectedToken&&showTokenEdit&&<TokenEditPanel token={selectedToken} onUpdate={updateToken} onDelete={()=>setPendingDelete({type:'token',id:selectedToken.id,name:selectedToken.name})} onClose={()=>{setSelectedToken(null);selectedTokenRef.current=null;setShowTokenEdit(false);drawFrame();}}/>}
       </div>
     </div>
   );
