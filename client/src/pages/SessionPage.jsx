@@ -8,9 +8,11 @@ import ActionLog from '../components/ActionLog';
 import Notifications from '../components/Notifications';
 import QuestTracker from '../components/QuestTracker';
 import WikiPanel from '../components/WikiPanel';
+import ProfileModal from '../components/ProfileModal';
 
 export default function SessionPage({ sessionId, onBack }) {
   const { user, token, logout } = useAuth();
+  const [showProfile, setShowProfile] = useState(false);
   const socket = useSocket();
   const { currentSessionRef } = useSocketContext();
   const [session, setSession] = useState(null);
@@ -77,6 +79,7 @@ export default function SessionPage({ sessionId, onBack }) {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Notifications />
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
 
       {/* Top Navigation */}
       <nav style={{
@@ -114,6 +117,7 @@ export default function SessionPage({ sessionId, onBack }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>⚔️ {user.username}</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowProfile(true)} title="Mon profil">👤</button>
           <button className="btn btn-secondary btn-sm" onClick={logout}>Décon.</button>
         </div>
       </nav>

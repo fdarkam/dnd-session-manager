@@ -322,8 +322,9 @@ router.put('/:id', authMiddleware, (req, res) => {
     if (!character) return res.status(404).json({ error: 'Personnage non trouvé' });
 
     const role = getMemberRole(character.session_id, req.user.id);
-    if (role !== 'dm') {
-      return res.status(403).json({ error: 'Seul le MJ peut modifier les personnages' });
+    const isAssignedPlayer = character.assigned_user_id === req.user.id;
+    if (role !== 'dm' && !isAssignedPlayer) {
+      return res.status(403).json({ error: 'Vous ne pouvez modifier que votre propre personnage' });
     }
 
     const updates = [];
@@ -364,6 +365,13 @@ router.put('/:id/assign', authMiddleware, (req, res) => {
     if (assigned_user_id) {
       const targetMember = getMemberRole(character.session_id, assigned_user_id);
       if (!targetMember) return res.status(400).json({ error: 'Ce joueur n\'est pas dans la session' });
+      // Enforce 1 character per player per session
+      const alreadyAssigned = db.prepare(
+        'SELECT id, name FROM characters WHERE session_id = ? AND assigned_user_id = ? AND id != ?'
+      ).get(character.session_id, assigned_user_id, req.params.id);
+      if (alreadyAssigned) return res.status(409).json({
+        error: `Ce joueur a déjà un personnage dans cette session : "${alreadyAssigned.name}"`
+      });
     }
 
     db.prepare('UPDATE characters SET assigned_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')

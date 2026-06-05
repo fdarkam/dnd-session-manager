@@ -5,9 +5,9 @@ import { useAuth, API } from '../contexts/AuthContext';
 // ─── Sound configuration — placez vos fichiers dans client/public/sounds/ ────
 //     Laissez vide ('') pour utiliser le son procédural généré automatiquement.
 const SOUND_FILES = {
-  nat20: '/sounds/nat20.mp3',   // ex: fanfare.mp3
-  nat1:  '/sounds/nat1.mp3',    // ex: fail.mp3
-  roll:  '/sounds/roll.mp3',    // ex: dice_roll.mp3
+  nat20: '/sounds/nat20.mp3',
+  nat1:  '/sounds/fart.mp3',
+  roll:  '/sounds/roll_dice.mp3',
 };
 
 // ─── Web Audio fallback (si le fichier est absent ou vide) ───────────────────

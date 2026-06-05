@@ -56,8 +56,33 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const updateProfile = async (username) => {
+    const res = await fetch(`${API}/auth/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ username })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    localStorage.setItem('dnd-token', data.token);
+    setToken(data.token);
+    setUser(prev => ({ ...prev, ...data.user }));
+    return data;
+  };
+
+  const updatePassword = async (current, newPassword) => {
+    const res = await fetch(`${API}/auth/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ current, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout, updateProfile, updatePassword }}>
       {children}
     </AuthContext.Provider>
   );

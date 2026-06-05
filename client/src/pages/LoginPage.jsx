@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, API } from '../contexts/AuthContext';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -8,6 +8,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const [showReset, setShowReset] = useState(false);
+  const [resetDmUser, setResetDmUser] = useState('');
+  const [resetDmPwd, setResetDmPwd] = useState('');
+  const [resetTarget, setResetTarget] = useState('');
+  const [resetNewPwd, setResetNewPwd] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +31,32 @@ export default function LoginPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDmReset = async (e) => {
+    e.preventDefault();
+    setResetMsg('');
+    setResetLoading(true);
+    try {
+      const res = await fetch(`${API}/auth/dm-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dmUsername: resetDmUser,
+          dmPassword: resetDmPwd,
+          targetUsername: resetTarget,
+          newPassword: resetNewPwd,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setResetMsg('✅ Mot de passe réinitialisé ! Le joueur peut se reconnecter.');
+      setResetDmUser(''); setResetDmPwd(''); setResetTarget(''); setResetNewPwd('');
+    } catch (err) {
+      setResetMsg('❌ ' + err.message);
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -106,37 +140,108 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Pseudo</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Entrez votre pseudo"
-              required
-              autoFocus
-            />
-          </div>
-          <div className="form-group">
-            <label>Mot de passe</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Entrez votre mot de passe"
-              required
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary btn-lg w-full"
-            disabled={loading}
-            style={{ marginTop: 'var(--space-sm)' }}
-          >
-            {loading ? '⏳' : isLogin ? '⚔️ Se connecter' : '📜 S\'inscrire'}
-          </button>
-        </form>
+        {!showReset ? (
+          <>
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label>Pseudo</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Entrez votre pseudo"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label>Mot de passe</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Entrez votre mot de passe"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary btn-lg w-full"
+                disabled={loading}
+                style={{ marginTop: 'var(--space-sm)' }}
+              >
+                {loading ? '⏳' : isLogin ? '⚔️ Se connecter' : '📜 S\'inscrire'}
+              </button>
+            </form>
+            {isLogin && (
+              <div style={{ textAlign: 'center', marginTop: 'var(--space-md)' }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  onClick={() => { setShowReset(true); setError(''); setResetMsg(''); }}
+                >
+                  🔑 Mot de passe oublié ?
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ marginBottom: 'var(--space-md)' }}>
+              <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--accent-primary)', fontSize: '1rem', marginBottom: '6px' }}>
+                🔑 Réinitialisation par le MJ
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                Le Maître de Jeu entre ses identifiants pour définir un nouveau mot de passe à un joueur.
+              </p>
+            </div>
+            {resetMsg && (
+              <div style={{
+                padding: '10px 14px',
+                background: resetMsg.startsWith('❌') ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                border: `1px solid ${resetMsg.startsWith('❌') ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                borderRadius: 'var(--radius-sm)',
+                color: resetMsg.startsWith('❌') ? 'var(--accent-danger)' : 'var(--accent-success)',
+                fontSize: '0.85rem',
+                marginBottom: 'var(--space-md)',
+              }}>
+                {resetMsg}
+              </div>
+            )}
+            <form onSubmit={handleDmReset}>
+              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', fontWeight: 600 }}>Identifiants du MJ</p>
+                <div className="form-group">
+                  <label>Pseudo MJ</label>
+                  <input type="text" value={resetDmUser} onChange={(e) => setResetDmUser(e.target.value)} required autoFocus autoComplete="username" />
+                </div>
+                <div className="form-group">
+                  <label>Mot de passe MJ</label>
+                  <input type="password" value={resetDmPwd} onChange={(e) => setResetDmPwd(e.target.value)} required autoComplete="current-password" />
+                </div>
+              </div>
+              <div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', fontWeight: 600 }}>Joueur à réinitialiser</p>
+                <div className="form-group">
+                  <label>Pseudo du joueur</label>
+                  <input type="text" value={resetTarget} onChange={(e) => setResetTarget(e.target.value)} required autoComplete="off" />
+                </div>
+                <div className="form-group">
+                  <label>Nouveau mot de passe</label>
+                  <input type="password" value={resetNewPwd} onChange={(e) => setResetNewPwd(e.target.value)} minLength={4} required autoComplete="new-password" />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
+                <button type="submit" className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={resetLoading}>
+                  {resetLoading ? '⏳' : '🔑 Réinitialiser'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => { setShowReset(false); setResetMsg(''); }}>
+                  Retour
+                </button>
+              </div>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
