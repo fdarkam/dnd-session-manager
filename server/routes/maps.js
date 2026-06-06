@@ -73,13 +73,15 @@ router.post('/', authMiddleware, upload.single('image'), (req, res) => {
 });
 
 // Upload token image
-router.post('/token-image', authMiddleware, uploadToken.single('image'), (req, res) => {
-  try {
+router.post('/token-image', authMiddleware, (req, res) => {
+  uploadToken.single('image')(req, res, (err) => {
+    if (err) {
+      console.error('Token upload error:', err);
+      return res.status(400).json({ error: err.message || 'Erreur upload image' });
+    }
     if (!req.file) return res.status(400).json({ error: 'Image requise' });
     res.json({ path: `/uploads/tokens/${req.file.filename}` });
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  });
 });
 
 router.get('/session/:sessionId', authMiddleware, (req, res) => {
