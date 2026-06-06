@@ -1319,12 +1319,15 @@ export default function MapCanvas({ sessionId, isDM }) {
             )}
           </div>
         </div>
-        {/* Canvas — transparent, au-dessus de la map HTML, en dessous du token overlay */}
+        {/* Canvas — position:absolute pour participer au stacking context et s'intercaler
+            correctement entre la map HTML (avant dans le DOM) et les tokens (après).
+            Sans position:absolute, le canvas est peint avant tous les éléments positionnés,
+            y compris la map, ce qui fait passer les dessins derrière l'image. */}
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           onContextMenu={e => e.preventDefault()}
-          style={{ width: '100%', height: '100%', display: 'block' }}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'block' }}
         />
         {/* Token overlay — après le canvas dans le DOM = au-dessus du canvas (z-index supérieur) */}
         {/* pointer-events:none → les clics passent à travers au canvas */}
