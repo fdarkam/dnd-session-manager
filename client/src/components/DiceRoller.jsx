@@ -3,43 +3,9 @@ import { useSocket } from '../contexts/SocketContext';
 import { useAuth, API } from '../contexts/AuthContext';
 import { parseDice } from '../utils/dice';
 
-// ─── Sound configuration — placez vos fichiers dans client/public/sounds/ ────
-//     Laissez vide ('') pour utiliser le son procédural généré automatiquement.
-const SOUND_FILES = {
-  nat20: '/sounds/success.mp3',
-  nat1: '/sounds/fart.mp3',
-  roll: '/sounds/roll_dice.mp3',
-};
-
-// ─── Web Audio fallback (si le fichier est absent ou vide) ───────────────────
-function _proceduralNat20(ctx) {
-  [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
-    const osc = ctx.createOscillator(); const g = ctx.createGain();
-    osc.connect(g); g.connect(ctx.destination);
-    osc.type = 'sine'; osc.frequency.value = freq;
-    const t = ctx.currentTime + i * 0.13;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.3, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.22);
-    osc.start(t); osc.stop(t + 0.25);
-  });
-}
-function _proceduralNat1(ctx) {
-  const osc = ctx.createOscillator(); const g = ctx.createGain(); const filter = ctx.createBiquadFilter();
-  osc.connect(filter); filter.connect(g); g.connect(ctx.destination);
-  osc.type = 'sawtooth'; filter.type = 'lowpass'; filter.frequency.value = 700;
-  osc.frequency.setValueAtTime(360, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.9);
-  g.gain.setValueAtTime(0.22, ctx.currentTime); g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.9);
-  osc.start(); osc.stop(ctx.currentTime + 0.9);
-}
-function _proceduralRoll(ctx) {
-  const len = Math.floor(ctx.sampleRate * 0.16);
-  const buf = ctx.createBuffer(1, len, ctx.sampleRate); const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.8);
-  const src = ctx.createBufferSource(); src.buffer = buf;
-  const g = ctx.createGain(); g.gain.value = 0.2;
-  src.connect(g); g.connect(ctx.destination); src.start();
-}
-const PROCEDURAL = { nat20: _proceduralNat20, nat1: _proceduralNat1, roll: _proceduralRoll };
+// La logique son (audioCtxRef, SOUND_FILES, fonctions procédurales, playDiceSound)
+// a été déplacée dans Notifications.jsx qui est toujours monté dans SessionPage,
+// garantissant que les sons jouent même quand ce panneau est fermé.
 
 export default function DiceRoller({ sessionId }) {
   const socket = useSocket();
@@ -50,35 +16,11 @@ export default function DiceRoller({ sessionId }) {
   const [lastResult, setLastResult] = useState(null);
   const [rolling, setRolling] = useState(false);
   const historyRef = useRef(null);
-  const audioCtxRef = useRef(null);
-
-  const getAudioCtx = () => {
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
-    return audioCtxRef.current;
-  };
-
-  const playDiceSound = (roll) => {
-    try {
-      const results = typeof roll.results === 'string' ? JSON.parse(roll.results) : roll.results;
-      const isD20 = /^1d20$/i.test((roll.expression || '').trim());
-      const key = isD20 && results[0] === 20 ? 'nat20' : isD20 && results[0] === 1 ? 'nat1' : 'roll';
-      const src = SOUND_FILES[key];
-      if (src) {
-        // Tente le fichier audio — si absent/bloqué, bascule sur le son procédural
-        const a = new Audio(src);
-        a.volume = 0.75;
-        a.play().catch(() => { try { PROCEDURAL[key](getAudioCtx()); } catch { } });
-      } else {
-        PROCEDURAL[key](getAudioCtx());
-      }
-    } catch { /* ignore */ }
-  };
 
   const setExpressionPersisted = (val) => { setExpression(val); sessionStorage.setItem(storageKey, val); };
 
   useEffect(() => {
-    // Fetch history
+    // Chargement de l'historique au montage
     fetch(`${API}/dice/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
@@ -88,6 +30,7 @@ export default function DiceRoller({ sessionId }) {
 
   useEffect(() => {
     if (!socket) return;
+    // Mise à jour de l'historique visuel uniquement — le son est géré par Notifications.jsx
     const handler = (data) => {
       const roll = {
         ...data,
@@ -95,14 +38,13 @@ export default function DiceRoller({ sessionId }) {
       };
       setHistory(prev => [roll, ...prev]);
       setLastResult(roll);
-      playDiceSound(roll);
       setTimeout(() => {
         if (historyRef.current) historyRef.current.scrollTop = 0;
       }, 50);
     };
     socket.on('dice-result', handler);
     return () => socket.off('dice-result', handler);
-  }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [socket]);
 
   const rollDice = () => {
     const parsed = parseDice(expression);
