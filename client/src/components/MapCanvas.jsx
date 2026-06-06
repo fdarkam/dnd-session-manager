@@ -160,6 +160,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const lastCursorEmit = useRef(0);
   const lastDrawEmit = useRef(0);
   const lastFogEmit = useRef(0);
+  const lastImgTransformEmit = useRef(0); // Feature 2 — throttle du broadcast live image transform
+  const gifAnimRef = useRef(null);         // Feature 4 — RAF loop dédié aux GIF animés
   const panStartRef = useRef({ x: 0, y: 0 }); // avoids re-renders during panning
   const pingAnimRef = useRef([]);
   const lerpAnimRef = useRef(null);
@@ -233,11 +235,13 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [showTokenEdit, setShowTokenEdit] = useState(false);
   const [showDice, setShowDice] = useState(false);
   const [showCombat, setShowCombat] = useState(false);
+  const [editingMapName, setEditingMapName] = useState(null); // Feature 5 — null = pas en édition, string = en cours
   const [newTokenName, setNewTokenName] = useState('');
   const [newTokenColor, setNewTokenColor] = useState('#c9a84c');
   const [newTokenBorderColor, setNewTokenBorderColor] = useState('#ffffff');
   const [newTokenRadius, setNewTokenRadius] = useState(20);
   const newTokenFileRef = useRef();
+  const gifContainerRef = useRef(null); // Feature 4 — conteneur DOM caché pour les img GIF animées
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
 
@@ -364,9 +368,20 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.save(); ctx.beginPath(); ctx.arc(vx, vy, r, 0, Math.PI * 2); ctx.clip();
       if (t.image) {
         const ck = t.id + '_img'; const cache = imgCacheRef.current;
+        const isGif = /\.gif($|\?)/i.test(t.image); // Feature 4 — détection GIF
         if (!cache[ck] || cache[ck + '_src'] !== t.image) {
+          // Retirer l'ancienne image GIF du DOM si elle y était
+          if (cache[ck] instanceof HTMLImageElement && cache[ck].parentNode) {
+            cache[ck].parentNode.removeChild(cache[ck]);
+          }
           const io = new Image(); io.crossOrigin = 'anonymous';
-          io.onload = () => { cache[ck] = io; cache[ck + '_src'] = t.image; drawFrame(); };
+          io.onload = () => {
+            cache[ck] = io; cache[ck + '_src'] = t.image;
+            // Insérer le GIF dans le DOM caché pour que le navigateur l'anime image par image
+            if (isGif && gifContainerRef.current) gifContainerRef.current.appendChild(io);
+            drawFrame();
+            if (isGif) startGifAnimation(); // démarrer le loop GIF dès que l'image est prête
+          };
           cache[ck] = null; cache[ck + '_src'] = t.image; io.src = t.image;
         }
         if (cache[ck]) ctx.drawImage(cache[ck], vx - r, vy - r, r * 2, r * 2);
@@ -459,6 +474,21 @@ export default function MapCanvas({ sessionId, isDM }) {
     ctx.restore();
   }, []); // ← empty deps: all data comes from refs
 
+  // ─── Loop RAF dédié aux GIF animés — actif quand lerpAnimation est inactif ──
+  const startGifAnimation = useCallback(() => {
+    if (gifAnimRef.current) return; // déjà en cours
+    const loop = () => {
+      // Vérifier si des tokens GIF sont visibles (visible pour le rôle courant)
+      const hasGif = tokensRef.current.some(t =>
+        t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDMRef.current)
+      );
+      if (!hasGif) { gifAnimRef.current = null; return; } // arrêter si plus de GIF visibles
+      drawFrame();
+      gifAnimRef.current = requestAnimationFrame(loop);
+    };
+    gifAnimRef.current = requestAnimationFrame(loop);
+  }, [drawFrame]);
+
   // ─── Token interpolation loop ─────────────────────────────────────────────
   const startLerpAnimation = useCallback(() => {
     if (lerpAnimRef.current) return;
@@ -480,9 +510,11 @@ export default function MapCanvas({ sessionId, isDM }) {
       });
       drawFrame();
       lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
+      // Relayer l'animation GIF quand le lerp se termine (sinon les GIF gèleraient)
+      if (!active) startGifAnimation();
     };
     lerpAnimRef.current = requestAnimationFrame(animate);
-  }, [drawFrame]);
+  }, [drawFrame, startGifAnimation]);
 
   // ─── ResizeObserver: initial draw when container gets its size ───────────
   useEffect(() => {
@@ -607,9 +639,19 @@ export default function MapCanvas({ sessionId, isDM }) {
       fogCellsRef.current = s; setFogCells(s);
       if (gs) { gridSizeRef.current = gs; setGridSize(gs); }
     };
-    const onImageUpdated = ({ mapId, img_x, img_y, img_scale }) => {
+    // Feature 2 — mise à jour image live (pendant drag MJ) ou finale (mouseUp)
+    const onImageUpdated = ({ mapId, img_x, img_y, img_scale, live }) => {
       if (mapId !== activeMapRef.current?.id) return;
-      setImgX(img_x); setImgY(img_y); setImgScale(img_scale);
+      // Mise à jour immédiate des refs → drawFrame sans attendre React
+      imgXRef.current = img_x; imgYRef.current = img_y; imgScaleRef.current = img_scale;
+      drawFrame();
+      // Synchro React state seulement pour la position finale (évite les re-renders pendant le drag)
+      if (!live) { setImgX(img_x); setImgY(img_y); setImgScale(img_scale); }
+    };
+    // Feature 5 — renommage de map en temps réel
+    const onMapRenamed = ({ mapId, name }) => {
+      setMaps(prev => prev.map(m => m.id === mapId ? { ...m, name } : m));
+      setActiveMap(prev => (prev?.id === mapId ? { ...prev, name } : prev));
     };
     const onMapDeleted = ({ mapId }) => {
       setMaps(prev => { const next = prev.filter(m => m.id !== mapId); if (activeMapRef.current?.id === mapId) setActiveMap(next[0] || null); return next; });
@@ -646,6 +688,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-fog-live', onFogLive);
     socket.on('map-image-updated', onImageUpdated);
     socket.on('map-deleted', onMapDeleted);
+    socket.on('map-renamed', onMapRenamed);
     socket.on('cursor-update', onCursorUpdate);
     socket.on('map-ping', onPing);
     socket.on('map-grid-size', onGridSize);
@@ -664,6 +707,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-fog-live', onFogLive);
       socket.off('map-image-updated', onImageUpdated);
       socket.off('map-deleted', onMapDeleted);
+      socket.off('map-renamed', onMapRenamed);
       socket.off('cursor-update', onCursorUpdate);
       socket.off('map-ping', onPing);
       socket.off('map-grid-size', onGridSize);
@@ -843,6 +887,14 @@ export default function MapCanvas({ sessionId, isDM }) {
         if (selectedTokenRef.current?.id !== clicked.id) setShowTokenEdit(false);
         dragMoved.current = false;
         selectedTokenRef.current = clicked; setSelectedToken(clicked);
+        // Feature 1 — amener le token au premier plan (dernier dans le tableau = dessiné par-dessus)
+        if (clicked.id !== tokensRef.current[tokensRef.current.length - 1]?.id) {
+          const reordered = [...tokensRef.current.filter(t => t.id !== clicked.id), clicked];
+          tokensRef.current = reordered; setTokens(reordered);
+          if (socket && activeMapRef.current) {
+            socket.emit('map-token-reorder', { sessionId, mapId: activeMapRef.current.id, tokens: reordered });
+          }
+        }
         const canManage = isDM || !clicked.createdBy || clicked.createdBy === user?.id;
         if (canManage) { isDraggingRef.current = clicked; setDragging(clicked); }
         return;
@@ -878,7 +930,17 @@ export default function MapCanvas({ sessionId, isDM }) {
         if (type === 'ne' || type === 'nw') ny = startY + startH - nh;
         imgScaleRef.current = ns; imgXRef.current = nx; imgYRef.current = ny;
       }
-      drawFrame(); return; // setState deferred to mouseUp → no re-renders during drag
+      drawFrame();
+      // Feature 2 — diffuser la transformation en temps réel aux joueurs (throttled ~60fps)
+      if (socket && activeMapRef.current && now - lastImgTransformEmit.current > 16) {
+        lastImgTransformEmit.current = now;
+        socket.emit('map-image-transform', {
+          sessionId, mapId: activeMapRef.current.id,
+          img_x: Math.round(imgXRef.current), img_y: Math.round(imgYRef.current),
+          img_scale: imgScaleRef.current, live: true
+        });
+      }
+      return; // setState deferred to mouseUp → no re-renders during drag
     }
     if (fogPainting.current && isDM) {
       paintFog(pos.x, pos.y, toolRef.current === 'fog-add');
@@ -1032,6 +1094,20 @@ export default function MapCanvas({ sessionId, isDM }) {
   };
   const resetImgTransform = () => { setImgX(0); setImgY(0); setImgScale(1); drawFrame(); emitImgTransform(0, 0, 1); };
 
+  // Feature 5 — valider le renommage de la map active
+  const saveMapName = () => {
+    if (editingMapName === null) return;
+    const name = editingMapName.trim();
+    if (name && name !== activeMap?.name) {
+      // Émettre via socket → le serveur persiste et broadcaste map-renamed à tous
+      if (socket) socket.emit('map-rename', { sessionId, mapId: activeMap.id, name });
+      // Mise à jour locale immédiate pour éviter le flash
+      setMaps(prev => prev.map(m => m.id === activeMap.id ? { ...m, name } : m));
+      setActiveMap(prev => prev ? { ...prev, name } : prev);
+    }
+    setEditingMapName(null);
+  };
+
   const getCursor = () => {
     if (tool === 'fog-add' || tool === 'fog-erase' || tool === 'erase') return 'cell';
     if (tool === 'draw') return 'crosshair';
@@ -1087,7 +1163,9 @@ export default function MapCanvas({ sessionId, isDM }) {
 
         {isDM && (tool === 'fog-add' || tool === 'fog-erase') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-            <input type="number" value={fogBrushPx} onChange={e => { const v = Math.max(10, Number(e.target.value)); setFogBrushPx(v); fogBrushPxRef.current = v; }} min={10} max={500} style={{ width: '52px', padding: '2px 4px', fontSize: '0.78rem' }} />
+            {/* Feature 3 — slider + champ numérique synchronisés pour le pinceau fog */}
+            <input type="range" min={10} max={500} value={fogBrushPx} onChange={e => { const v = Number(e.target.value); setFogBrushPx(v); fogBrushPxRef.current = v; }} style={{ width: '70px', cursor: 'pointer' }} />
+            <input type="number" value={fogBrushPx} onChange={e => { const v = clamp(Number(e.target.value), 10, 500); setFogBrushPx(v); fogBrushPxRef.current = v; }} min={10} max={500} style={{ width: '52px', padding: '2px 4px', fontSize: '0.78rem' }} />
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>px</span>
             <input type="color" value={fogColor} onChange={e => setFogColor(e.target.value)} style={{ width: '24px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
             {fogCells.size > 0 && <button className="btn btn-sm btn-danger" onClick={clearFog}>🗑️{fogCells.size}</button>}
@@ -1142,7 +1220,13 @@ export default function MapCanvas({ sessionId, isDM }) {
               gridSizeRef.current = gs; setGridSize(gs); drawFrame();
               if (socket && activeMapRef.current) socket.emit('map-grid-size', { sessionId, mapId: activeMapRef.current.id, gridSize: gs });
             }} style={{ width: '60px', cursor: 'pointer' }} />
-            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '24px' }}>{gridSize}px</span>
+            {/* Feature 3 — champ numérique synchronisé avec le slider grille */}
+            <input type="number" value={gridSize} min={20} max={120} onChange={e => {
+              const gs = clamp(Number(e.target.value), 20, 120);
+              gridSizeRef.current = gs; setGridSize(gs); drawFrame();
+              if (socket && activeMapRef.current) socket.emit('map-grid-size', { sessionId, mapId: activeMapRef.current.id, gridSize: gs });
+            }} style={{ width: '46px', padding: '2px 4px', fontSize: '0.78rem' }} />
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>px</span>
           </div>
         )}
 
@@ -1164,6 +1248,27 @@ export default function MapCanvas({ sessionId, isDM }) {
           <select value={activeMap?.id || ''} onChange={e => { const s = maps.find(m => m.id === e.target.value); if (s) switchMap(s); }} style={{ padding: '2px 5px', fontSize: '0.78rem', maxWidth: '130px' }}>
             {maps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+        )}
+        {/* Feature 5 — renommage de la map active — MJ uniquement (double-clic) */}
+        {isDM && activeMap && (
+          editingMapName !== null ? (
+            <input
+              type="text"
+              value={editingMapName}
+              onChange={e => setEditingMapName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveMapName(); if (e.key === 'Escape') setEditingMapName(null); }}
+              onBlur={saveMapName}
+              autoFocus
+              style={{ width: '110px', fontSize: '0.78rem', padding: '2px 6px' }}
+            />
+          ) : (
+            <button
+              className="btn btn-sm btn-secondary"
+              title="Double-clic pour renommer la map"
+              onDoubleClick={() => setEditingMapName(activeMap.name || '')}
+              style={{ fontSize: '0.72rem', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >✏️ {activeMap.name}</button>
+          )
         )}
 
         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{Math.round(zoom * 100)}%</span>
@@ -1210,6 +1315,8 @@ export default function MapCanvas({ sessionId, isDM }) {
 
       {/* Canvas */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
+        {/* Feature 4 — conteneur DOM caché pour les img GIF : le navigateur les anime même hors-écran */}
+        <div ref={gifContainerRef} style={{ display: 'none', position: 'absolute' }} aria-hidden="true" />
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}

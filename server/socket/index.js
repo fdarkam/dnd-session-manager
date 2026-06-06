@@ -322,14 +322,42 @@ export function setupSocket(io) {
     });
 
     // ---- Map : transformation image (position/échelle) ----
+    // live=true → broadcast uniquement (pas DB), live=false → DB + broadcast
     socket.on('map-image-transform', (data) => {
-      const { sessionId, mapId, img_x, img_y, img_scale } = data;
+      const { sessionId, mapId, img_x, img_y, img_scale, live } = data;
       if (!isDM(sessionId, socket.user.id)) return;
-      try {
-        db.prepare('UPDATE maps SET img_x = ?, img_y = ?, img_scale = ? WHERE id = ?')
-          .run(Math.round(img_x || 0), Math.round(img_y || 0), img_scale || 1.0, mapId);
-      } catch (err) { console.error('DB transform error:', err); }
-      socket.to(sessionId).emit('map-image-updated', { mapId, img_x, img_y, img_scale });
+      if (!live) {
+        try {
+          db.prepare('UPDATE maps SET img_x = ?, img_y = ?, img_scale = ? WHERE id = ?')
+            .run(Math.round(img_x || 0), Math.round(img_y || 0), img_scale || 1.0, mapId);
+        } catch (err) { console.error('DB transform error:', err); }
+      }
+      socket.to(sessionId).emit('map-image-updated', { mapId, img_x, img_y, img_scale, live: !!live });
+    });
+
+    // ---- Token : réordonnancement (amener au premier plan) ----
+    socket.on('map-token-reorder', (data) => {
+      const { sessionId, mapId, tokens } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
+      // Fusionner les tokens cachés pour les non-MJ (le joueur n'envoie que les tokens visibles)
+      const finalTokens = !isDM(sessionId, socket.user.id)
+        ? mergeWithHidden(mapId, tokens || [])
+        : (tokens || []);
+      try { db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(finalTokens), mapId); }
+      catch (err) { console.error('DB token-reorder error:', err); }
+      // Exclure l'émetteur : il a déjà mis à jour son état local
+      broadcastTokens(sessionId, mapId, finalTokens, false, socket.id);
+    });
+
+    // ---- Map : renommage (MJ uniquement) ----
+    socket.on('map-rename', (data) => {
+      const { sessionId, mapId, name } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
+      if (!name?.trim()) return;
+      try { db.prepare('UPDATE maps SET name = ? WHERE id = ?').run(name.trim(), mapId); }
+      catch (err) { console.error('DB map-rename error:', err); }
+      // Informer tous les membres (y compris le MJ) du nouveau nom
+      io.to(sessionId).emit('map-renamed', { mapId, name: name.trim() });
     });
 
     // ---- Map : suppression ----
