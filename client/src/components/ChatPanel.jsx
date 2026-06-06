@@ -78,11 +78,11 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
       // Expression invalide — laisser passer comme message texte
     }
 
-    // Message standard ou privé (destinataire uniquement accessible au MJ)
+    // Message standard ou privé (tous les membres peuvent choisir un destinataire)
     socket.emit('chat-message', {
       sessionId,
       content: input.trim(),
-      targetUserId: isDM && targetUserId ? targetUserId : undefined,
+      targetUserId: targetUserId || undefined,
     });
     setInput('');
   };
@@ -173,7 +173,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: isOwn ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
                     {msg.username}
                   </span>
-                  {/* Badge "Message privé du MJ" visible côté expéditeur et destinataire */}
+                  {/* Badge visible pour l'expéditeur (→ destinataire) et le destinataire (de expéditeur) */}
                   {isPrivate && (
                     <span style={{
                       fontSize: '0.62rem', padding: '1px 6px', borderRadius: 10,
@@ -181,7 +181,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
                       border: '1px solid rgba(139,92,246,0.3)',
                       whiteSpace: 'nowrap',
                     }}>
-                      🔒 privé {isOwn ? `→ ${getMemberName(msg.target_user_id)}` : '(MJ)'}
+                      🔒 privé {isOwn ? `→ ${getMemberName(msg.target_user_id)}` : `de ${getMemberName(msg.user_id)}`}
                     </span>
                   )}
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
@@ -198,8 +198,8 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
         <div ref={bottomRef} />
       </div>
 
-      {/* ─── Sélecteur de destinataire — MJ uniquement ────────── */}
-      {isDM && targetablePlayers.length > 0 && (
+      {/* ─── Sélecteur de destinataire — tous les membres ───────── */}
+      {targetablePlayers.length > 0 && (
         <div style={{
           padding: '4px var(--space-sm)',
           borderTop: '1px solid var(--border-color)',
@@ -235,7 +235,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            isDM && targetUserId
+            targetUserId
               ? `Message privé → ${getMemberName(targetUserId)}…`
               : '!r 1d20  ou  message…'
           }
