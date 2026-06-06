@@ -145,6 +145,27 @@ router.put('/:id/activate', authMiddleware, (req, res) => {
   }
 });
 
+// Renommer une map — MJ uniquement
+router.put('/:id/rename', authMiddleware, (req, res) => {
+  try {
+    const map = db.prepare('SELECT * FROM maps WHERE id = ?').get(req.params.id);
+    if (!map) return res.status(404).json({ error: 'Map non trouvée' });
+
+    const member = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
+      .get(map.session_id, req.user.id);
+    if (!member || member.role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut renommer une map' });
+
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Nom requis' });
+
+    db.prepare('UPDATE maps SET name = ? WHERE id = ?').run(name.trim(), req.params.id);
+    res.json({ success: true, name: name.trim() });
+  } catch (err) {
+    console.error('Rename map error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // DELETE map — DM only
 router.delete('/:id', authMiddleware, (req, res) => {
   try {
