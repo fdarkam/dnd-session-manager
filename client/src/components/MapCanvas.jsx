@@ -241,7 +241,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [newTokenBorderColor, setNewTokenBorderColor] = useState('#ffffff');
   const [newTokenRadius, setNewTokenRadius] = useState(20);
   const newTokenFileRef = useRef();
-  const gifContainerRef = useRef(null); // Feature 4 — conteneur DOM caché pour les img GIF animées
+  const prevMapIdRef = useRef(null); // garde contre rechargement de map sur simple rename
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
 
@@ -368,22 +368,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.save(); ctx.beginPath(); ctx.arc(vx, vy, r, 0, Math.PI * 2); ctx.clip();
       if (t.image) {
         const ck = t.id + '_img'; const cache = imgCacheRef.current;
-        const isGif = /\.gif($|\?)/i.test(t.image); // Feature 4 — détection GIF
-        if (!cache[ck] || cache[ck + '_src'] !== t.image) {
-          // Retirer l'ancienne image GIF du DOM si elle y était
-          if (cache[ck] instanceof HTMLImageElement && cache[ck].parentNode) {
-            cache[ck].parentNode.removeChild(cache[ck]);
-          }
+        const isGif = /\.gif($|\?)/i.test(t.image);
+        if (!isGif && (!cache[ck] || cache[ck + '_src'] !== t.image)) {
+          // Non-GIF : chargement via Image()
           const io = new Image(); io.crossOrigin = 'anonymous';
-          io.onload = () => {
-            cache[ck] = io; cache[ck + '_src'] = t.image;
-            // Insérer le GIF dans le DOM caché pour que le navigateur l'anime image par image
-            if (isGif && gifContainerRef.current) gifContainerRef.current.appendChild(io);
-            drawFrame();
-            if (isGif) startGifAnimation(); // démarrer le loop GIF dès que l'image est prête
-          };
+          io.onload = () => { cache[ck] = io; cache[ck + '_src'] = t.image; drawFrame(); };
           cache[ck] = null; cache[ck + '_src'] = t.image; io.src = t.image;
         }
+        // GIF : cache[ck] alimenté par le ref callback du overlay React
         if (cache[ck]) ctx.drawImage(cache[ck], vx - r, vy - r, r * 2, r * 2);
         else { ctx.fillStyle = t.color || '#c9a84c'; ctx.fill(); }
       } else { ctx.fillStyle = t.color || '#c9a84c'; ctx.fill(); }
@@ -716,10 +708,10 @@ export default function MapCanvas({ sessionId, isDM }) {
     };
   }, [socket, startLerpAnimation, drawFrame]);
 
-  // Load map when active changes
+  // Load map when active changes — guard against spurious re-runs (ex: rename)
   useEffect(() => {
     if (!activeMap) {
-      // All maps deleted — clear canvas to empty grid
+      prevMapIdRef.current = null;
       mapImageRef.current = null; setMapImage(null);
       tokensRef.current = []; setTokens([]);
       pathsRef.current = []; setPaths([]);
@@ -728,27 +720,26 @@ export default function MapCanvas({ sessionId, isDM }) {
       drawFrame();
       return;
     }
+    if (prevMapIdRef.current === activeMap.id) return; // même map (rename, etc.) — ne pas recharger
+    prevMapIdRef.current = activeMap.id;
+
     const isMapGif = /\.gif($|\?)/i.test(activeMap.image_path || '');
-    const io = new Image();
-    io.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
-    io.onload = () => {
-      mapImageRef.current = io; setMapImage(io);
-      if (isMapGif && gifContainerRef.current) {
-        const prev = gifContainerRef.current.querySelector('[data-mapbg]');
-        if (prev) prev.remove();
-        io.dataset.mapbg = '1';
-        gifContainerRef.current.appendChild(io);
-        startGifAnimation();
-      }
-    };
-    io.onerror = () => { mapImageRef.current = null; setMapImage(null); };
+    if (!isMapGif) {
+      // Non-GIF : Image() classique
+      const io = new Image();
+      io.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
+      io.onload = () => { mapImageRef.current = io; setMapImage(io); };
+      io.onerror = () => { mapImageRef.current = null; setMapImage(null); };
+    }
+    // GIF map background : le overlay React alimentera mapImageRef via onLoad
+
     const toks = typeof activeMap.tokens === 'string' ? JSON.parse(activeMap.tokens) : (activeMap.tokens || []);
     tokensRef.current = toks; setTokens(toks);
     const pths = typeof activeMap.drawings === 'string' ? JSON.parse(activeMap.drawings) : (activeMap.drawings || []);
     pathsRef.current = pths; setPaths(pths);
     livePathsRef.current = {};
     loadFog(activeMap); loadImgTransform(activeMap);
-  }, [activeMap, drawFrame, startGifAnimation]);
+  }, [activeMap, drawFrame]);
 
   const loadFog = (map) => {
     try {
@@ -764,6 +755,12 @@ export default function MapCanvas({ sessionId, isDM }) {
     const x = map.img_x || 0, y = map.img_y || 0, s = map.img_scale || 1;
     setImgX(x); setImgY(y); setImgScale(s);
   };
+
+  // Démarrer la boucle d'animation GIF dès que des tokens GIF sont présents
+  useEffect(() => {
+    const hasGif = tokens.some(t => t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDM));
+    if (hasGif) startGifAnimation();
+  }, [tokens, isDM, startGifAnimation]);
 
   const fetchMaps = useCallback(async () => {
     const res = await fetch(`${API}/maps/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1327,8 +1324,31 @@ export default function MapCanvas({ sessionId, isDM }) {
 
       {/* Canvas */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
-        {/* Feature 4 — conteneur DOM caché pour les img GIF : le navigateur les anime même hors-écran */}
-        <div ref={gifContainerRef} style={{ position: 'fixed', top: 0, left: 0, pointerEvents: 'none', visibility: 'hidden' }} aria-hidden="true" />
+        {/* GIF overlay — img DOM éléments rendus par React : le navigateur anime les frames nativement */}
+        <div style={{ position: 'absolute', top: 0, left: 0, opacity: 0.001, pointerEvents: 'none', zIndex: -1 }} aria-hidden="true">
+          {tokens.filter(t => t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDM)).map(t => (
+            <img
+              key={t.id + '_gifdom'}
+              src={t.image}
+              ref={el => { if (el) imgCacheRef.current[t.id + '_img'] = el; else delete imgCacheRef.current[t.id + '_img']; }}
+              onLoad={e => { imgCacheRef.current[t.id + '_img'] = e.currentTarget; drawFrame(); startGifAnimation(); }}
+              style={{ position: 'absolute', width: 8, height: 8 }}
+              draggable={false}
+              alt=""
+            />
+          ))}
+          {activeMap?.image_path && /\.gif($|\?)/i.test(activeMap.image_path) && (
+            <img
+              key="mapbg_gif"
+              src={`${import.meta.env.VITE_API_URL}${activeMap.image_path}`}
+              style={{ position: 'absolute', width: 8, height: 8 }}
+              draggable={false}
+              alt=""
+              onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); startGifAnimation(); }}
+              onError={() => { mapImageRef.current = null; setMapImage(null); }}
+            />
+          )}
+        </div>
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
