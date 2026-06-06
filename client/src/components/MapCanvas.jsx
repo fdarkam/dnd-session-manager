@@ -1074,9 +1074,9 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (socket && activeMapRef.current) socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: [], gridSize: gridSizeRef.current });
   };
   const switchMap = (sel) => {
-    if (sel.id === activeMapRef.current?.id) return;
+    if (!isDM || sel.id === activeMapRef.current?.id) return;
     setActiveMap(sel);
-    if (isDM && socket) socket.emit('map-change', { sessionId, mapId: sel.id, currentMapId: activeMapRef.current?.id, tokens: tokensRef.current });
+    if (socket) socket.emit('map-change', { sessionId, mapId: sel.id, currentMapId: activeMapRef.current?.id, tokens: tokensRef.current });
   };
   const resetImgTransform = () => { setImgX(0); setImgY(0); setImgScale(1); drawFrame(); emitImgTransform(0, 0, 1); };
 
@@ -1231,7 +1231,7 @@ export default function MapCanvas({ sessionId, isDM }) {
           </>
         )}
 
-        {maps.length > 1 && (
+        {isDM && maps.length > 1 && (
           <select value={activeMap?.id || ''} onChange={e => { const s = maps.find(m => m.id === e.target.value); if (s) switchMap(s); }} style={{ padding: '2px 5px', fontSize: '0.78rem', maxWidth: '130px' }}>
             {maps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
