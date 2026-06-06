@@ -412,6 +412,12 @@ router.delete('/:id', authMiddleware, (req, res) => {
     }
 
     db.prepare('DELETE FROM characters WHERE id = ?').run(req.params.id);
+
+    // Notifier tous les membres de la session en temps réel pour retrait immédiat côté client
+    if (_io) {
+      _io.to(character.session_id).emit('character-deleted', { characterId: req.params.id });
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });

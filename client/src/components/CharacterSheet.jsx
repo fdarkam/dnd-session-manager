@@ -35,6 +35,18 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     return () => socket.off('character-assigned', handler);
   }, [socket]);
 
+  // Retrait en temps réel quand le MJ supprime une fiche — évite un rechargement côté joueur
+  useEffect(() => {
+    if (!socket) return;
+    const handler = ({ characterId }) => {
+      setCharacters(prev => prev.filter(c => c.id !== characterId));
+      // Désélectionner si la fiche supprimée était affichée
+      setSelected(prev => (prev?.id === characterId ? null : prev));
+    };
+    socket.on('character-deleted', handler);
+    return () => socket.off('character-deleted', handler);
+  }, [socket]);
+
   const fetchCharacters = async () => {
     const res = await fetch(`${API}/characters/session/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -190,8 +202,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` }
     });
-    setCharacters(prev => prev.filter(c => c.id !== pendingDeleteChar.id));
-    if (selected?.id === pendingDeleteChar.id) setSelected(null);
+    // Le retrait local est géré par le listener character-deleted via socket
     setPendingDeleteChar(null);
   };
 
@@ -235,7 +246,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
   } catch { skills = []; }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in" style={{ height: '100%', overflowY: 'auto', padding: 'var(--space-md)', boxSizing: 'border-box' }}>
       {/* Confirmation suppression personnage */}
       {pendingDeleteChar && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -295,15 +306,20 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
           </button>
         ))}
         {isDM && <button className="btn btn-secondary btn-sm" onClick={createCharacter}>+ Nouveau</button>}
-        <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-          📥 JSON
-          <input type="file" accept=".json" onChange={importCharacter} style={{ display: 'none' }} />
-        </label>
-        <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', borderColor: pdfImporting ? 'var(--accent-primary)' : undefined }}>
-          {pdfImporting ? '⏳ Import...' : '📄 Import PDF'}
-          <input type="file" accept=".pdf" onChange={importPdf} disabled={pdfImporting} style={{ display: 'none' }} />
-        </label>
-        {selected && (
+        {/* Fix 2 — Import JSON, Import PDF et Transfert réservés au MJ */}
+        {isDM && (
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+            📥 JSON
+            <input type="file" accept=".json" onChange={importCharacter} style={{ display: 'none' }} />
+          </label>
+        )}
+        {isDM && (
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', borderColor: pdfImporting ? 'var(--accent-primary)' : undefined }}>
+            {pdfImporting ? '⏳ Import...' : '📄 Import PDF'}
+            <input type="file" accept=".pdf" onChange={importPdf} disabled={pdfImporting} style={{ display: 'none' }} />
+          </label>
+        )}
+        {isDM && selected && (
           <button className="btn btn-secondary btn-sm" onClick={openTransferModal}>🔄 Transférer</button>
         )}
         {saving && <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)' }}>💾 Sauvegarde...</span>}

@@ -6,9 +6,8 @@ export default function ActionLog({ sessionId }) {
   const [logs, setLogs] = useState([]);
 
   useEffect(() => {
+    // Chargement unique au montage — pas de polling ni de bouton Rafraîchir
     fetchLogs();
-    const interval = setInterval(fetchLogs, 10000);
-    return () => clearInterval(interval);
   }, [sessionId]);
 
   const fetchLogs = async () => {
@@ -40,7 +39,6 @@ export default function ActionLog({ sessionId }) {
       <div className="panel">
         <div className="panel-header">
           <h3>📋 Journal d'actions</h3>
-          <button className="btn btn-secondary btn-sm" onClick={fetchLogs}>🔄</button>
         </div>
         <div style={{ maxHeight: '500px', overflowY: 'auto', padding: 'var(--space-sm)' }}>
           {logs.length === 0 ? (
