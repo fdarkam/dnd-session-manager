@@ -728,9 +728,19 @@ export default function MapCanvas({ sessionId, isDM }) {
       drawFrame();
       return;
     }
+    const isMapGif = /\.gif($|\?)/i.test(activeMap.image_path || '');
     const io = new Image();
     io.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
-    io.onload = () => { mapImageRef.current = io; setMapImage(io); };
+    io.onload = () => {
+      mapImageRef.current = io; setMapImage(io);
+      if (isMapGif && gifContainerRef.current) {
+        const prev = gifContainerRef.current.querySelector('[data-mapbg]');
+        if (prev) prev.remove();
+        io.dataset.mapbg = '1';
+        gifContainerRef.current.appendChild(io);
+        startGifAnimation();
+      }
+    };
     io.onerror = () => { mapImageRef.current = null; setMapImage(null); };
     const toks = typeof activeMap.tokens === 'string' ? JSON.parse(activeMap.tokens) : (activeMap.tokens || []);
     tokensRef.current = toks; setTokens(toks);
@@ -738,7 +748,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     pathsRef.current = pths; setPaths(pths);
     livePathsRef.current = {};
     loadFog(activeMap); loadImgTransform(activeMap);
-  }, [activeMap, drawFrame]);
+  }, [activeMap, drawFrame, startGifAnimation]);
 
   const loadFog = (map) => {
     try {
@@ -808,6 +818,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const snapPos = (x, y) => ({ x, y });
   const paintFog = (wx, wy, adding) => {
     const half = fogBrushPxRef.current / 2, gs = gridSizeRef.current;
+    if (gs <= 0) return;
     const cx0 = Math.floor((wx - half) / gs), cy0 = Math.floor((wy - half) / gs);
     const cx1 = Math.floor((wx + half) / gs), cy1 = Math.floor((wy + half) / gs);
     const next = new Set(fogCellsRef.current);
@@ -1164,8 +1175,8 @@ export default function MapCanvas({ sessionId, isDM }) {
         {isDM && (tool === 'fog-add' || tool === 'fog-erase') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
             {/* Feature 3 — slider + champ numérique synchronisés pour le pinceau fog */}
-            <input type="range" min={10} max={500} value={fogBrushPx} onChange={e => { const v = Number(e.target.value); setFogBrushPx(v); fogBrushPxRef.current = v; }} style={{ width: '70px', cursor: 'pointer' }} />
-            <input type="number" value={fogBrushPx} onChange={e => { const v = clamp(Number(e.target.value), 10, 500); setFogBrushPx(v); fogBrushPxRef.current = v; }} min={10} max={500} style={{ width: '52px', padding: '2px 4px', fontSize: '0.78rem' }} />
+            <input type="range" min={0} max={500} value={fogBrushPx} onChange={e => { const v = Number(e.target.value); setFogBrushPx(v); fogBrushPxRef.current = v; }} style={{ width: '70px', cursor: 'pointer' }} />
+            <input type="number" value={fogBrushPx} onChange={e => { const v = clamp(Number(e.target.value), 0, 500); setFogBrushPx(v); fogBrushPxRef.current = v; }} min={0} max={500} style={{ width: '52px', padding: '2px 4px', fontSize: '0.78rem' }} />
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>px</span>
             <input type="color" value={fogColor} onChange={e => setFogColor(e.target.value)} style={{ width: '24px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
             {fogCells.size > 0 && <button className="btn btn-sm btn-danger" onClick={clearFog}>🗑️{fogCells.size}</button>}
@@ -1215,14 +1226,14 @@ export default function MapCanvas({ sessionId, isDM }) {
         {isDM && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
             <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Grille</span>
-            <input type="range" min={20} max={120} value={gridSize} onChange={e => {
+            <input type="range" min={0} max={120} value={gridSize} onChange={e => {
               const gs = Number(e.target.value);
               gridSizeRef.current = gs; setGridSize(gs); drawFrame();
               if (socket && activeMapRef.current) socket.emit('map-grid-size', { sessionId, mapId: activeMapRef.current.id, gridSize: gs });
             }} style={{ width: '60px', cursor: 'pointer' }} />
             {/* Feature 3 — champ numérique synchronisé avec le slider grille */}
-            <input type="number" value={gridSize} min={20} max={120} onChange={e => {
-              const gs = clamp(Number(e.target.value), 20, 120);
+            <input type="number" value={gridSize} min={0} max={120} onChange={e => {
+              const gs = clamp(Number(e.target.value), 0, 120);
               gridSizeRef.current = gs; setGridSize(gs); drawFrame();
               if (socket && activeMapRef.current) socket.emit('map-grid-size', { sessionId, mapId: activeMapRef.current.id, gridSize: gs });
             }} style={{ width: '46px', padding: '2px 4px', fontSize: '0.78rem' }} />
@@ -1316,7 +1327,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       {/* Canvas */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
         {/* Feature 4 — conteneur DOM caché pour les img GIF : le navigateur les anime même hors-écran */}
-        <div ref={gifContainerRef} style={{ display: 'none', position: 'absolute' }} aria-hidden="true" />
+        <div ref={gifContainerRef} style={{ position: 'fixed', bottom: 0, right: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden="true" />
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
