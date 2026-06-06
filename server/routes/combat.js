@@ -47,9 +47,14 @@ router.put('/:id', authMiddleware, (req, res) => {
 
     const member = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
       .get(encounter.session_id, req.user.id);
-    if (!member || member.role !== 'dm') return res.status(403).json({ error: 'Seul le MJ peut modifier le combat' });
+    if (!member) return res.status(403).json({ error: 'Accès refusé' });
 
     const { entities, current_turn, round, is_active } = req.body;
+
+    // Seul le MJ peut terminer le combat (is_active = false)
+    if (is_active !== undefined && member.role !== 'dm') {
+      return res.status(403).json({ error: 'Seul le MJ peut terminer le combat' });
+    }
     const updates = [];
     const values = [];
 

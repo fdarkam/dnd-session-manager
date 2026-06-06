@@ -419,7 +419,7 @@ export function setupSocket(io) {
     // ---- Combat ----
     socket.on('combat-update', (data) => {
       const { sessionId, encounter } = data;
-      if (!isDM(sessionId, socket.user.id)) return;
+      if (!isMember(sessionId, socket.user.id)) return;
       try {
         if (encounter)
           db.prepare('UPDATE combat_encounters SET entities = ?, current_turn = ?, round = ? WHERE id = ?')
@@ -430,14 +430,26 @@ export function setupSocket(io) {
 
     socket.on('combat-next-turn', (data) => {
       const { sessionId, encounter } = data;
-      if (!isDM(sessionId, socket.user.id)) return;
+      if (!isMember(sessionId, socket.user.id)) return;
+      // Si non-MJ, vérifier que c'est bien son tour dans la DB (avant avancement)
+      if (!isDM(sessionId, socket.user.id)) {
+        try {
+          const dbEnc = db.prepare('SELECT entities, current_turn FROM combat_encounters WHERE id = ?')
+            .get(encounter?.id);
+          if (!dbEnc) return;
+          const entities = JSON.parse(dbEnc.entities || '[]');
+          const currentEnt = entities[dbEnc.current_turn];
+          const uid = socket.user.id;
+          if (!currentEnt || (currentEnt.addedBy !== uid && currentEnt.userId !== uid)) return;
+        } catch { return; }
+      }
       io.to(sessionId).emit('combat-turn-changed', encounter);
       if (encounter?.entities) {
         const entities = typeof encounter.entities === 'string'
           ? JSON.parse(encounter.entities) : encounter.entities;
         const active = entities[encounter.current_turn];
         if (active) io.to(sessionId).emit('notification', {
-          type: 'turn', message: `C'est au tour de ${active.name} !`, entity: active
+          type: 'turn', message: `C'est au tour de ${active.name} !`, entity: active,
         });
       }
     });
