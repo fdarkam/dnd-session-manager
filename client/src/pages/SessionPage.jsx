@@ -27,16 +27,22 @@ export default function SessionPage({ sessionId, onBack }) {
     fetchSession();
   }, [sessionId]);
 
-  // Rejoindre la room socket et initialiser la présence
+  // Rejoindre la room socket et initialiser la présence.
+  // setTimeout(0) : en StrictMode React exécute mount→cleanup→mount de façon synchrone ;
+  // le cleanup annule le timeout avant qu'il ne fire, évitant le faux "rejoint→quitté→rejoint".
   useEffect(() => {
-    if (socket && sessionId) {
-      currentSessionRef.current = sessionId;
+    if (!socket || !sessionId) return;
+    currentSessionRef.current = sessionId;
+    let joined = false;
+    const t = setTimeout(() => {
       socket.emit('join-session', sessionId);
-      return () => {
-        currentSessionRef.current = null;
-        socket.emit('leave-session', sessionId);
-      };
-    }
+      joined = true;
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      currentSessionRef.current = null;
+      if (joined) socket.emit('leave-session', sessionId);
+    };
   }, [socket, sessionId]);
 
   // Écouter les événements de présence envoyés par le serveur
