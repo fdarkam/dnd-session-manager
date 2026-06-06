@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import db from './db.js';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
-import characterRoutes from './routes/characters.js';
+import characterRoutes, { setIo as setCharacterIo } from './routes/characters.js';
 import mapRoutes from './routes/maps.js';
 import combatRoutes from './routes/combat.js';
 import questRoutes from './routes/quests.js';
@@ -109,6 +109,7 @@ app.get('/api/dice/:sessionId', authMiddleware, (req, res) => {
 
 // Setup Socket.IO
 setupSocket(io);
+setCharacterIo(io);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

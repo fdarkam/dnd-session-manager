@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 
-export default function CharacterSheet({ sessionId, isDM }) {
+export default function CharacterSheet({ sessionId, isDM, members = [], onlineUsers = new Set() }) {
   const { user, token } = useAuth();
+  const socket = useSocket();
   const [characters, setCharacters] = useState([]);
   const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -11,27 +13,27 @@ export default function CharacterSheet({ sessionId, isDM }) {
   const [showTransfer, setShowTransfer] = useState(false);
   const [userSessions, setUserSessions] = useState([]);
   const [transferring, setTransferring] = useState(false);
-  const [members, setMembers] = useState([]);
   const [assignMsg, setAssignMsg] = useState('');
+  const [pendingDeleteChar, setPendingDeleteChar] = useState(null);
   const saveTimeout = useRef(null);
 
   useEffect(() => {
     fetchCharacters();
   }, [sessionId]);
 
+  // Écouter les assignations en temps réel (le joueur reçoit sa fiche immédiatement)
   useEffect(() => {
-    if (isDM && sessionId) fetchMembers();
-  }, [isDM, sessionId]);
-
-  const fetchMembers = async () => {
-    const res = await fetch(`${API}/sessions/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setMembers(data.members || []);
-    }
-  };
+    if (!socket) return;
+    const handler = (char) => {
+      setCharacters(prev => {
+        const exists = prev.some(c => c.id === char.id);
+        return exists ? prev.map(c => c.id === char.id ? char : c) : [...prev, char];
+      });
+      setSelected(prev => (prev?.id === char.id ? char : prev || char));
+    };
+    socket.on('character-assigned', handler);
+    return () => socket.off('character-assigned', handler);
+  }, [socket]);
 
   const fetchCharacters = async () => {
     const res = await fetch(`${API}/characters/session/${sessionId}`, {
@@ -177,14 +179,20 @@ export default function CharacterSheet({ sessionId, isDM }) {
     }
   };
 
-  const deleteCharacter = async (id) => {
-    if (!confirm('Supprimer ce personnage ?')) return;
-    await fetch(`${API}/characters/${id}`, {
+  const deleteCharacter = (id) => {
+    const char = characters.find(c => c.id === id);
+    setPendingDeleteChar({ id, name: char?.name || 'ce personnage' });
+  };
+
+  const confirmDeleteCharacter = async () => {
+    if (!pendingDeleteChar) return;
+    await fetch(`${API}/characters/${pendingDeleteChar.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` }
     });
-    setCharacters(prev => prev.filter(c => c.id !== id));
-    setSelected(null);
+    setCharacters(prev => prev.filter(c => c.id !== pendingDeleteChar.id));
+    if (selected?.id === pendingDeleteChar.id) setSelected(null);
+    setPendingDeleteChar(null);
   };
 
   const assignCharacter = async (userId) => {
@@ -206,7 +214,7 @@ export default function CharacterSheet({ sessionId, isDM }) {
     setTimeout(() => setAssignMsg(''), 3000);
   };
 
-  const canEdit = isDM || (selected && (selected.user_id === user.id || selected.assigned_user_id === user.id));
+  const canEdit = isDM;
 
   const getModifier = (stat) => {
     const mod = Math.floor((stat - 10) / 2);
@@ -228,6 +236,50 @@ export default function CharacterSheet({ sessionId, isDM }) {
 
   return (
     <div className="animate-fade-in">
+      {/* Confirmation suppression personnage */}
+      {pendingDeleteChar && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" style={{ maxWidth: 360, width: '90%', textAlign: 'center', padding: 'var(--space-lg)' }}>
+            <div style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}>🗑️</div>
+            <h3 style={{ fontFamily: 'var(--font-heading)', marginBottom: 'var(--space-sm)' }}>Supprimer le personnage ?</h3>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-lg)', fontSize: '0.9rem' }}>
+              « {pendingDeleteChar.name} » sera définitivement supprimé.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-sm)', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setPendingDeleteChar(null)}>Annuler</button>
+              <button className="btn btn-danger" onClick={confirmDeleteCharacter}>Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member presence bar */}
+      {members.length > 0 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center',
+          padding: '6px var(--space-md)', marginBottom: 'var(--space-sm)',
+          background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border-color)',
+        }}>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', flexShrink: 0 }}>👥</span>
+          {members.map(m => {
+            const isOnline = onlineUsers.has(m.id);
+            return (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title={isOnline ? 'En ligne' : 'Hors ligne'}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                  background: isOnline ? '#22c55e' : 'var(--text-muted)',
+                  boxShadow: isOnline ? '0 0 4px #22c55e88' : 'none',
+                }} />
+                <span style={{ fontSize: '0.72rem', color: isOnline ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                  {m.username}{m.role === 'dm' ? ' 👑' : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Character Selector */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)', flexWrap: 'wrap' }}>
         {characters.map(c => (

@@ -48,9 +48,13 @@ export default function SessionPage({ sessionId, onBack }) {
       setOnlineUsers(new Set(Array.isArray(userIds) ? userIds : []));
     };
 
-    // Quelqu'un vient de rejoindre la session → ajouter à la liste
-    const onUserJoined = ({ id }) => {
+    // Quelqu'un vient de rejoindre la session → ajouter à la présence + members si absent
+    const onUserJoined = ({ id, username, role }) => {
       setOnlineUsers(prev => new Set([...prev, id]));
+      setSession(prev => {
+        if (!prev || prev.members?.some(m => m.id === id)) return prev;
+        return { ...prev, members: [...(prev.members || []), { id, username, role: role || 'player' }] };
+      });
     };
 
     // Quelqu'un a quitté la session → retirer de la liste
@@ -162,7 +166,7 @@ export default function SessionPage({ sessionId, onBack }) {
       </nav>
 
       {/* Main Content */}
-      <div className="session-layout" style={{ flex: 1, overflow: 'hidden', gridTemplateColumns: showChat ? '1fr 360px' : '1fr' }}>
+      <div className="session-layout" style={{ flex: 1, overflow: 'hidden', gridTemplateColumns: showChat ? undefined : 'minmax(0, 1fr)' }}>
         {/* Tabs */}
         <div style={{
           gridColumn: '1',
@@ -186,7 +190,7 @@ export default function SessionPage({ sessionId, onBack }) {
         {/* Tab Content — tous les onglets restent montés pour conserver leurs états et listeners socket */}
         <div className="session-main">
           <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
-            <CharacterSheet sessionId={sessionId} isDM={isDM} />
+            <CharacterSheet sessionId={sessionId} isDM={isDM} members={session.members || []} onlineUsers={onlineUsers} />
           </div>
           <div style={{ display: activeTab === 'quests' ? 'block' : 'none', height: '100%' }}>
             <QuestTracker sessionId={sessionId} isDM={isDM} />
