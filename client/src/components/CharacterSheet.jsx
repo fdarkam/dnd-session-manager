@@ -47,6 +47,17 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     return () => socket.off('character-deleted', handler);
   }, [socket]);
 
+  // Fix 2 — Sync PV combat → fiche : mettre à jour hp_current quand le combat modifie les PV
+  useEffect(() => {
+    if (!socket) return;
+    const handler = (character) => {
+      setCharacters(prev => prev.map(c => c.id === character.id ? { ...c, ...character } : c));
+      setSelected(prev => prev?.id === character.id ? { ...prev, ...character } : prev);
+    };
+    socket.on('character-updated', handler);
+    return () => socket.off('character-updated', handler);
+  }, [socket]);
+
   const fetchCharacters = async () => {
     const res = await fetch(`${API}/characters/session/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -93,6 +104,13 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     setSelected(updated);
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c));
     autoSave(updated);
+    // Fix 2 — Sync hp_current fiche → combat en temps réel
+    if (field === 'hp_current' && socket) {
+      socket.emit('character-update', {
+        sessionId,
+        character: { id: updated.id, hp_current: value },
+      });
+    }
   };
 
   const exportCharacter = async () => {

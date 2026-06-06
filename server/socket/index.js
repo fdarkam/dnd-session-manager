@@ -455,9 +455,17 @@ export function setupSocket(io) {
     });
 
     // ---- Sync fiche de personnage ----
+    // Fix 2 — Persister hp_current en DB et broadcaster à tous (y compris l'émetteur)
+    // pour que le combat tracker du même client reçoive aussi le changement
     socket.on('character-update', (data) => {
       const { sessionId, character } = data;
-      socket.to(sessionId).emit('character-updated', character);
+      if (character?.id && character?.hp_current !== undefined) {
+        try {
+          db.prepare('UPDATE characters SET hp_current = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(character.hp_current, character.id);
+        } catch {}
+      }
+      io.to(sessionId).emit('character-updated', character);
     });
 
     socket.on('disconnect', () => {
