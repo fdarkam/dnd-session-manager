@@ -351,33 +351,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.beginPath(); ctx.moveTo(cp[0].x, cp[0].y); cp.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
     }
 
-    // Tokens — rings & handles only; images/name/lock sont dans le token overlay HTML
-    tokensRef.current.forEach(t => {
-      if (t.hidden && !dm) return;
-
-      const vis = tokenVisualsRef.current[t.id];
-      const vx = vis?.x ?? t.x;
-      const vy = vis?.y ?? t.y;
-      const r = clamp(t.radius || 22, 10, 120);
-      const sel = selectedTokenRef.current?.id === t.id;
-
-      if (t.hidden) ctx.globalAlpha = 0.5;
-
-      if (sel) {
-        ctx.beginPath(); ctx.arc(vx, vy, r + 6 / z, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(250,204,21,0.35)'; ctx.lineWidth = 6 / z; ctx.stroke();
-      }
-      ctx.beginPath(); ctx.arc(vx, vy, r + 2 / z, 0, Math.PI * 2);
-      ctx.strokeStyle = sel ? '#facc15' : (t.borderColor || '#fff'); ctx.lineWidth = (sel ? 3 : 2) / z; ctx.stroke();
-
-      if (sel && !t.locked) {
-        ctx.beginPath(); ctx.arc(vx + r * 0.707, vy + r * 0.707, 5 / z, 0, Math.PI * 2);
-        ctx.fillStyle = '#facc15'; ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 1 / z; ctx.stroke();
-      }
-
-      if (t.hidden) ctx.globalAlpha = 1;
-    });
+    // Anneaux et handles de sélection → rendu en CSS (box-shadow) dans le token overlay HTML
+    // pour éviter qu'ils soient cachés sous les divs HTML à z-index supérieur
 
     // Fog cells
     if (fc.size > 0) {
@@ -1078,7 +1053,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (tool === 'fog-add' || tool === 'fog-erase' || tool === 'erase') return 'cell';
     if (tool === 'draw') return 'crosshair';
     if (tool === 'token') return 'copy';
-    if (tool === 'map-edit') return editingMapImg ? (editingMapImg.type === 'move' ? 'grabbing' : 'nwse-resize') : 'default';
+    if (tool === 'map-edit') { if (!editingMapImg) return 'default'; if (editingMapImg.type === 'move') return 'grabbing'; return ['nw','se'].includes(editingMapImg.type) ? 'nwse-resize' : 'nesw-resize'; }
     if (resizingToken.current) return 'nwse-resize';
     if (dragging) return 'grabbing';
     return 'grab';
@@ -1325,19 +1300,31 @@ export default function MapCanvas({ sessionId, isDM }) {
                     width: r * 2,
                     height: r * 2,
                     borderRadius: '50%',
-                    overflow: 'hidden',
+                    // Pas de overflow:hidden ici — le box-shadow doit déborder du cercle
                     opacity: inFog ? 0 : (t.hidden ? 0.5 : 1),
+                    // Anneau de bordure + halo de sélection en CSS (toujours au-dessus du canvas)
+                    boxShadow: t.id === selectedToken?.id
+                      ? `0 0 0 2px #facc15, 0 0 0 8px rgba(250,204,21,0.35)`
+                      : `0 0 0 2px ${t.borderColor || '#fff'}`,
                   }}
                 >
-                  {t.image
-                    ? <img src={t.image} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} alt="" />
-                    : <div style={{ width: '100%', height: '100%', background: t.color || '#c9a84c' }} />
-                  }
+                  {/* Div interne qui clippe l'image au cercle */}
+                  <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', overflow: 'hidden' }}>
+                    {t.image
+                      ? <img src={t.image} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} alt="" />
+                      : <div style={{ width: '100%', height: '100%', background: t.color || '#c9a84c' }} />
+                    }
+                  </div>
+                  {/* Nom centré */}
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <span style={{ color: '#fff', fontSize: `${Math.max(7, Math.round(r * 0.38))}px`, fontWeight: 'bold', textShadow: '0 0 3px rgba(0,0,0,0.8)', textAlign: 'center', maxWidth: '90%', lineHeight: 1.1, wordBreak: 'break-word', userSelect: 'none' }}>{t.name}</span>
                   </div>
                   {t.locked && (
                     <span style={{ position: 'absolute', top: '6%', right: '6%', fontSize: `${Math.max(8, Math.round(r * 0.3))}px`, lineHeight: 1, userSelect: 'none' }}>🔒</span>
+                  )}
+                  {/* Handle de redimensionnement (coin bas-droite, hors du cercle) */}
+                  {t.id === selectedToken?.id && !t.locked && (
+                    <div style={{ position: 'absolute', left: r * 1.707 - 5, top: r * 1.707 - 5, width: 10, height: 10, borderRadius: '50%', background: '#facc15', border: '2px solid #000', zIndex: 1 }} />
                   )}
                 </div>
               );
