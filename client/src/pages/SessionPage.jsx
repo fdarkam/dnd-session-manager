@@ -195,7 +195,7 @@ export default function SessionPage({ sessionId, onBack }) {
 
         {/* Tab Content — tous les onglets restent montés pour conserver leurs états et listeners socket */}
         <div className="session-main">
-          <div style={{ display: activeTab === 'characters' ? 'block' : 'none', height: '100%' }}>
+          <div style={{ display: activeTab === 'characters' ? 'flex' : 'none', flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <CharacterSheet sessionId={sessionId} isDM={isDM} members={session.members || []} onlineUsers={onlineUsers} />
           </div>
           <div style={{ display: activeTab === 'quests' ? 'block' : 'none', height: '100%' }}>

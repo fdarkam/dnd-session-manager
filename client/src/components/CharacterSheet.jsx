@@ -246,7 +246,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
   } catch { skills = []; }
 
   return (
-    <div className="animate-fade-in" style={{ height: '100%', overflowY: 'auto', padding: 'var(--space-md)', boxSizing: 'border-box' }}>
+    <div className="animate-fade-in" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 'var(--space-md)' }}>
       {/* Confirmation suppression personnage */}
       {pendingDeleteChar && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
