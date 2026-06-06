@@ -41,7 +41,7 @@ const tokenStorage = multer.diskStorage({
 });
 const uploadToken = multer({
   storage: tokenStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.jpe', '.bmp', '.tiff', '.tif', '.avif'];
     const ext = path.extname(file.originalname).toLowerCase();
