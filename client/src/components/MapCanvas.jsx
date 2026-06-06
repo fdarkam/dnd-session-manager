@@ -683,8 +683,16 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (prevMapIdRef.current === activeMap.id) return; // même map (rename, etc.) — ne pas recharger
     prevMapIdRef.current = activeMap.id;
 
-    // mapImageRef sera alimenté par le onLoad du <img> HTML (mapImgElemRef)
-    mapImageRef.current = null; setMapImage(null);
+    // Charger l'image via Image() pour rendre mapImageRef disponible rapidement (hit-test map-edit)
+    // Le <img> HTML React gère l'affichage visuel (animation GIF native)
+    if (activeMap.image_path) {
+      const io = new Image();
+      io.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
+      io.onload = () => { if (prevMapIdRef.current === activeMap.id) { mapImageRef.current = io; setMapImage(io); } };
+      io.onerror = () => { mapImageRef.current = null; setMapImage(null); };
+    } else {
+      mapImageRef.current = null; setMapImage(null);
+    }
 
     const toks = typeof activeMap.tokens === 'string' ? JSON.parse(activeMap.tokens) : (activeMap.tokens || []);
     tokensRef.current = toks; setTokens(toks);
@@ -1285,7 +1293,7 @@ export default function MapCanvas({ sessionId, isDM }) {
                 style={{ position: 'absolute', display: 'block', objectFit: 'fill' }}
                 draggable={false}
                 alt=""
-                onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); }}
+                onLoad={e => { if (!mapImageRef.current) { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); } drawFrame(); }}
                 onError={() => { mapImageRef.current = null; setMapImage(null); }}
               />
             )}
