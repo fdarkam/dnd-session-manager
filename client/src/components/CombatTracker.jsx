@@ -37,7 +37,6 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [entityName, setEntityName] = useState('');
   const [entityInit, setEntityInit] = useState('');
   const [entityHP, setEntityHP] = useState('');
-  const [entityAC, setEntityAC] = useState('');
   const [entityType, setEntityType] = useState('enemy');
 
   // Feature 1 — Rejoindre le combat (joueur)
@@ -46,14 +45,14 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [joinName, setJoinName] = useState('');
   const [joinInit, setJoinInit] = useState('');
   const [joinHp, setJoinHp] = useState('');
-  const [joinAc, setJoinAc] = useState('');
   const [myCharacter, setMyCharacter] = useState(null);
 
   // Feature 2 — input PV par entité (entityId → valeur saisie)
   const [hpDeltas, setHpDeltas] = useState({});
 
-  // Feature 3 — sélecteur de statut ouvert (entityId ou null)
+  // Feature 3 — sélecteur de statut (entityId ou null) + position viewport
   const [statusOpen, setStatusOpen] = useState(null);
+  const [statusPickerPos, setStatusPickerPos] = useState({ left: 0, top: 0 });
 
   useEffect(() => { fetchEncounter(); }, [sessionId]);
 
@@ -83,6 +82,17 @@ export default function CombatTracker({ sessionId, isDM }) {
       socket.off('combat-turn-changed', onTurnChanged);
     };
   }, [socket]);
+
+  // Fermer le sélecteur de statut si on clique en dehors (position:fixed → pas dans le flow)
+  useEffect(() => {
+    if (!statusOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest('[data-status-picker]')) setStatusOpen(null);
+    };
+    // Délai 0 pour ignorer le mousedown qui a ouvert le picker
+    const id = setTimeout(() => document.addEventListener('mousedown', handler), 0);
+    return () => { clearTimeout(id); document.removeEventListener('mousedown', handler); };
+  }, [statusOpen]);
 
   const fetchEncounter = async () => {
     const res = await fetch(`${API}/combat/session/${sessionId}/active`, {
@@ -134,7 +144,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         initiative: parseInt(entityInit) || 0,
         hp: parseInt(entityHP) || 20,
         hp_max: parseInt(entityHP) || 20,
-        ac: parseInt(entityAC) || 10,
         type: entityType,
         addedBy: user?.id,
         statuses: [],
@@ -144,7 +153,7 @@ export default function CombatTracker({ sessionId, isDM }) {
     const updated = { ...encounter, entities };
     setEncounter(updated);
     broadcastUpdate(updated);
-    setEntityName(''); setEntityInit(''); setEntityHP(''); setEntityAC('');
+    setEntityName(''); setEntityInit(''); setEntityHP('');
   };
 
   // Feature 1 — Joueur rejoint le combat avec son personnage ou un compagnon
@@ -158,7 +167,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         initiative: parseInt(joinInit) || 0,
         hp: myCharacter.hp_current ?? myCharacter.hp_max ?? 10,
         hp_max: myCharacter.hp_max ?? 10,
-        ac: myCharacter.ac ?? 10,
         type: 'player',
         userId: user?.id,
         characterId: myCharacter.id,
@@ -173,7 +181,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         initiative: parseInt(joinInit) || 0,
         hp: parseInt(joinHp) || 10,
         hp_max: parseInt(joinHp) || 10,
-        ac: parseInt(joinAc) || 10,
         type: 'npc',
         addedBy: user?.id,
         statuses: [],
@@ -185,7 +192,7 @@ export default function CombatTracker({ sessionId, isDM }) {
     setEncounter(updated);
     broadcastUpdate(updated);
     setShowJoin(false);
-    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinAc('');
+    setJoinName(''); setJoinInit(''); setJoinHp('');
   };
 
   const removeEntity = (id) => {
@@ -221,6 +228,17 @@ export default function CombatTracker({ sessionId, isDM }) {
       });
     }
     setHpDeltas(prev => ({ ...prev, [entityId]: '' }));
+  };
+
+  // Feature 3 — Ouvrir le sélecteur de statut en position viewport
+  const openStatusPicker = (entityId, e) => {
+    if (statusOpen === entityId) { setStatusOpen(null); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setStatusPickerPos({
+      left: Math.max(8, Math.min(rect.right - 208, window.innerWidth - 216)),
+      top: Math.min(rect.bottom + 4, window.innerHeight - 290),
+    });
+    setStatusOpen(entityId);
   };
 
   // Feature 3 — Ajouter / retirer un statut (tout le monde peut le faire)
@@ -313,7 +331,7 @@ export default function CombatTracker({ sessionId, isDM }) {
 
   // ── Combat actif ─────────────────────────────────────────────────────────────
   return (
-    <div className="animate-fade-in" onClick={() => setStatusOpen(null)}>
+    <div className="animate-fade-in">
 
       {/* En-tête */}
       <div className="card" style={{ marginBottom: 'var(--space-sm)', padding: 'var(--space-sm)' }}>
@@ -392,7 +410,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                   {entity.type === 'enemy' ? '💀' : '🛡️'}
                 </span>
 
-                {/* Nom, barre HP, CA et badges statuts */}
+                {/* Nom, barre HP et badges statuts */}
                 <div style={{ flex: 1, minWidth: '80px' }}>
                   <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{entity.name}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
@@ -405,11 +423,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                     <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                       {entity.hp}/{hpMax} PV
                     </span>
-                    {entity.ac !== undefined && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                        🛡 {entity.ac}
-                      </span>
-                    )}
                   </div>
                   {/* Feature 3 — badges statuts actifs, cliquer pour retirer */}
                   {statuses.length > 0 && (
@@ -419,7 +432,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                         return (
                           <span
                             key={s}
-                            onClick={e => { e.stopPropagation(); toggleStatus(entity.id, s); }}
+                            onClick={() => toggleStatus(entity.id, s)}
                             title={`Retirer : ${s}`}
                             style={{
                               fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, cursor: 'pointer',
@@ -435,46 +448,18 @@ export default function CombatTracker({ sessionId, isDM }) {
                   )}
                 </div>
 
-                {/* Feature 3 — bouton sélecteur de statut (tout le monde) */}
-                <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setStatusOpen(statusOpen === entity.id ? null : entity.id)}
-                    title="Gérer les statuts"
-                    style={{ padding: '3px 7px', fontSize: '0.75rem' }}
-                  >
-                    ✦
-                  </button>
-                  {statusOpen === entity.id && (
-                    <div style={{
-                      position: 'absolute', right: 0, top: '100%', zIndex: 200, marginTop: 2,
-                      background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius-md)', padding: '6px',
-                      display: 'flex', flexWrap: 'wrap', gap: '4px', width: '200px',
-                      boxShadow: 'var(--shadow-md)',
-                    }}>
-                      {ALL_STATUSES.map(s => {
-                        const active = statuses.includes(s);
-                        const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
-                        return (
-                          <span
-                            key={s}
-                            onClick={() => toggleStatus(entity.id, s)}
-                            style={{
-                              fontSize: '0.65rem', padding: '2px 6px', borderRadius: 8, cursor: 'pointer',
-                              background: active ? sc.bg : 'var(--bg-tertiary)',
-                              color: active ? sc.color : 'var(--text-muted)',
-                              border: `1px solid ${active ? sc.color + '55' : 'var(--border-color)'}`,
-                              userSelect: 'none',
-                            }}
-                          >
-                            {active ? '✓ ' : ''}{s}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                {/* Feature 3 — bouton sélecteur de statut (tout le monde)
+                    Le picker est rendu en position:fixed (viewport) pour ne pas être clippé
+                    par l'overflow:hidden/auto du FloatingPanel parent */}
+                <button
+                  data-status-picker
+                  className="btn btn-secondary btn-sm"
+                  onClick={(e) => openStatusPicker(entity.id, e)}
+                  title="Gérer les statuts"
+                  style={{ padding: '3px 7px', fontSize: '0.75rem', flexShrink: 0 }}
+                >
+                  ✦
+                </button>
 
                 {/* Feature 2 — input PV + supprimer (visible si l'utilisateur peut éditer cette entité) */}
                 {canEditEntity(entity) && (
@@ -484,13 +469,12 @@ export default function CombatTracker({ sessionId, isDM }) {
                       value={hpDeltas[entity.id] || ''}
                       onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
                       onKeyDown={e => e.key === 'Enter' && applyHPDelta(entity.id)}
-                      onClick={e => e.stopPropagation()}
                       placeholder="±PV"
                       style={{ width: '52px', textAlign: 'center', fontSize: '0.78rem', padding: '3px 4px' }}
                     />
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={e => { e.stopPropagation(); applyHPDelta(entity.id); }}
+                      onClick={() => applyHPDelta(entity.id)}
                       title="Appliquer"
                       style={{ padding: '4px 7px' }}
                     >
@@ -498,7 +482,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                     </button>
                     <button
                       className="btn-icon"
-                      onClick={e => { e.stopPropagation(); removeEntity(entity.id); }}
+                      onClick={() => removeEntity(entity.id)}
                       title="Retirer du combat"
                       style={{ fontSize: '0.8rem' }}
                     >
@@ -516,6 +500,47 @@ export default function CombatTracker({ sessionId, isDM }) {
           )}
         </div>
       </div>
+
+      {/* Feature 3 — Picker de statut en position:fixed (hors du flow, non clippé) */}
+      {statusOpen && (
+        <div
+          data-status-picker
+          style={{
+            position: 'fixed',
+            left: statusPickerPos.left,
+            top: statusPickerPos.top,
+            zIndex: 9999,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-md)',
+            padding: '8px',
+            display: 'flex', flexWrap: 'wrap', gap: '5px',
+            width: '208px',
+            boxShadow: 'var(--shadow-md)',
+          }}
+        >
+          {ALL_STATUSES.map(s => {
+            const active = (encounter.entities.find(e => e.id === statusOpen)?.statuses || []).includes(s);
+            const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
+            return (
+              <span
+                key={s}
+                onClick={() => toggleStatus(statusOpen, s)}
+                style={{
+                  fontSize: '0.65rem', padding: '3px 7px', borderRadius: 8, cursor: 'pointer',
+                  background: active ? sc.bg : 'var(--bg-tertiary)',
+                  color: active ? sc.color : 'var(--text-muted)',
+                  border: `1px solid ${active ? sc.color + '55' : 'var(--border-color)'}`,
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {active ? '✓ ' : ''}{s}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* Formulaire ajout entité — MJ uniquement */}
       {isDM && (
@@ -539,10 +564,6 @@ export default function CombatTracker({ sessionId, isDM }) {
               <label>PV</label>
               <input type="number" value={entityHP} onChange={e => setEntityHP(e.target.value)} placeholder="20" />
             </div>
-            <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
-              <label>CA</label>
-              <input type="number" value={entityAC} onChange={e => setEntityAC(e.target.value)} placeholder="12" />
-            </div>
             <div className="form-group" style={{ width: '110px', marginBottom: 0 }}>
               <label>Type</label>
               <select value={entityType} onChange={e => setEntityType(e.target.value)}>
@@ -558,7 +579,7 @@ export default function CombatTracker({ sessionId, isDM }) {
 
       {/* Feature 1 — Rejoindre le combat (joueurs uniquement) */}
       {!isDM && (
-        <div className="card" onClick={e => e.stopPropagation()}>
+        <div className="card">
           {!showJoin ? (
             <button className="btn btn-primary w-full" onClick={() => setShowJoin(true)}>
               ⚔️ Rejoindre le combat
@@ -599,11 +620,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                     value={joinHp} onChange={e => setJoinHp(e.target.value)}
                     style={{ width: '68px' }}
                   />
-                  <input
-                    type="number" placeholder="CA"
-                    value={joinAc} onChange={e => setJoinAc(e.target.value)}
-                    style={{ width: '68px' }}
-                  />
                 </div>
               )}
 
@@ -623,7 +639,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                   className="btn btn-secondary"
                   onClick={() => {
                     setShowJoin(false);
-                    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinAc('');
+                    setJoinName(''); setJoinInit(''); setJoinHp('');
                   }}
                 >
                   Annuler
