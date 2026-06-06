@@ -1206,6 +1206,7 @@ export default function MapCanvas({ sessionId, isDM }) {
                 const fd = new FormData(); fd.append('image', f);
                 const res = await fetch(`${API}/maps/token-image`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
                 if (res.ok) { const d = await res.json(); setNewTokenImage(`${VITE_API}${d.path}`); }
+                else { const e = await res.json().catch(() => ({})); alert(`Erreur upload image (${res.status}): ${e.error || 'inconnue'}`); }
               }} style={{ display: 'none' }} />
             {newTokenImage && <button className="btn btn-sm btn-secondary" onClick={() => setNewTokenImage(null)}>✕</button>}
             {isDM && (
