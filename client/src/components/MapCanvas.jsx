@@ -161,7 +161,6 @@ export default function MapCanvas({ sessionId, isDM }) {
   const lastDrawEmit = useRef(0);
   const lastFogEmit = useRef(0);
   const lastImgTransformEmit = useRef(0); // Feature 2 — throttle du broadcast live image transform
-  const gifAnimRef = useRef(null);         // Feature 4 — RAF loop dédié aux GIF animés
   const panStartRef = useRef({ x: 0, y: 0 }); // avoids re-renders during panning
   const pingAnimRef = useRef([]);
   const lerpAnimRef = useRef(null);
@@ -242,6 +241,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const prevMapIdRef = useRef(null); // garde contre rechargement de map sur simple rename
   const tokenWorldRef = useRef(null); // overlay transform (sync pan/zoom canvas)
   const tokenDivsRef = useRef({});   // map id→div pour updates impératifs pendant lerp
+  const mapWorldRef = useRef(null);  // div transform pour la map HTML (même espace que tokenWorld)
+  const mapImgElemRef = useRef(null); // <img> DOM de la map background
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
 
@@ -290,20 +291,20 @@ export default function MapCanvas({ sessionId, isDM }) {
     ctx.scale(z, z);
     const W = canvas.width / z, H = canvas.height / z, wx0 = -pan.x / z, wy0 = -pan.y / z;
 
-    // Sync overlay token divs avec le canvas (pan + zoom)
-    if (tokenWorldRef.current) {
-      tokenWorldRef.current.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${z})`;
-    }
+    // Sync overlay divs avec le canvas (pan + zoom) — même transform pour map et tokens
+    const overlayTfm = `translate(${pan.x}px,${pan.y}px) scale(${z})`;
+    if (tokenWorldRef.current) tokenWorldRef.current.style.transform = overlayTfm;
+    if (mapWorldRef.current) mapWorldRef.current.style.transform = overlayTfm;
 
-    // Background
-    ctx.fillStyle = '#1c2033';
-    ctx.fillRect(wx0 - 2, wy0 - 2, W + 4, H + 4);
-
-    // Map image + optional edit overlay
-    if (img) {
+    // Canvas fond transparent — le fond #1c2033 vient du CSS container
+    // La map image est rendue comme <img> HTML dans mapWorldRef (animation GIF native)
+    if (img && mapImgElemRef.current) {
       const iw = img.naturalWidth * imgScaleRef.current;
       const ih = img.naturalHeight * imgScaleRef.current;
-      ctx.drawImage(img, imgXRef.current, imgYRef.current, iw, ih);
+      mapImgElemRef.current.style.left = `${imgXRef.current}px`;
+      mapImgElemRef.current.style.top = `${imgYRef.current}px`;
+      mapImgElemRef.current.style.width = `${iw}px`;
+      mapImgElemRef.current.style.height = `${ih}px`;
       if (dm && toolRef.current === 'map-edit') {
         const ix = imgXRef.current, iy = imgYRef.current;
         ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2 / z; ctx.setLineDash([6 / z, 3 / z]);
@@ -432,19 +433,6 @@ export default function MapCanvas({ sessionId, isDM }) {
     ctx.restore();
   }, []); // ← empty deps: all data comes from refs
 
-  // ─── Loop RAF dédié aux GIF animés — actif quand lerpAnimation est inactif ──
-  const startGifAnimation = useCallback(() => {
-    if (gifAnimRef.current) return;
-    const loop = () => {
-      // Loop uniquement si la map background est un GIF (tokens GIF animés via overlay HTML)
-      const hasGifBg = !!(activeMapRef.current?.image_path && /\.gif($|\?)/i.test(activeMapRef.current.image_path));
-      if (!hasGifBg) { gifAnimRef.current = null; return; }
-      drawFrame();
-      gifAnimRef.current = requestAnimationFrame(loop);
-    };
-    gifAnimRef.current = requestAnimationFrame(loop);
-  }, [drawFrame]);
-
   // ─── Token interpolation loop ─────────────────────────────────────────────
   const startLerpAnimation = useCallback(() => {
     if (lerpAnimRef.current) return;
@@ -476,11 +464,9 @@ export default function MapCanvas({ sessionId, isDM }) {
       });
       drawFrame();
       lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
-      // Relayer l'animation GIF quand le lerp se termine (sinon les GIF gèleraient)
-      if (!active) startGifAnimation();
     };
     lerpAnimRef.current = requestAnimationFrame(animate);
-  }, [drawFrame, startGifAnimation]);
+  }, [drawFrame]);
 
   // ─── ResizeObserver: initial draw when container gets its size ───────────
   useEffect(() => {
@@ -697,15 +683,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (prevMapIdRef.current === activeMap.id) return; // même map (rename, etc.) — ne pas recharger
     prevMapIdRef.current = activeMap.id;
 
-    const isMapGif = /\.gif($|\?)/i.test(activeMap.image_path || '');
-    if (!isMapGif) {
-      // Non-GIF : Image() classique
-      const io = new Image();
-      io.src = `${import.meta.env.VITE_API_URL}${activeMap.image_path}`;
-      io.onload = () => { mapImageRef.current = io; setMapImage(io); };
-      io.onerror = () => { mapImageRef.current = null; setMapImage(null); };
-    }
-    // GIF map background : le overlay React alimentera mapImageRef via onLoad
+    // mapImageRef sera alimenté par le onLoad du <img> HTML (mapImgElemRef)
+    mapImageRef.current = null; setMapImage(null);
 
     const toks = typeof activeMap.tokens === 'string' ? JSON.parse(activeMap.tokens) : (activeMap.tokens || []);
     tokensRef.current = toks; setTokens(toks);
@@ -964,6 +943,9 @@ export default function MapCanvas({ sessionId, isDM }) {
       tokensRef.current = upd; // no setTokens during drag — avoids React re-renders at 60fps
       tokenVisualsRef.current[isDraggingRef.current.id] = sp; // sync visual so drawFrame shows local movement
       if (selectedTokenRef.current?.id === isDraggingRef.current.id) { const mv = upd.find(t => t.id === isDraggingRef.current.id); selectedTokenRef.current = mv; } // no setSelectedToken in hot path
+      // Sync le div overlay impérativement (pas de re-render React pendant le drag)
+      const dragEl = tokenDivsRef.current[isDraggingRef.current.id];
+      if (dragEl) { const dr = clamp(isDraggingRef.current.radius || 22, 10, 120); dragEl.style.left = `${sp.x - dr}px`; dragEl.style.top = `${sp.y - dr}px`; }
       drawFrame();
       // ← Token drag emit at ~60fps (live=true → no DB write, triggers lerp on receivers)
       if (socket && now - lastDragEmit.current > 16) {
@@ -1291,19 +1273,25 @@ export default function MapCanvas({ sessionId, isDM }) {
       )}
 
       {/* Canvas */}
-      <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
-        {/* Map background GIF — img en DOM pour que Chrome avance les frames */}
-        {activeMap?.image_path && /\.gif($|\?)/i.test(activeMap.image_path) && (
-          <img
-            src={`${import.meta.env.VITE_API_URL}${activeMap.image_path}`}
-            style={{ position: 'absolute', width: 1, height: 1, opacity: 0.001, willChange: 'transform', pointerEvents: 'none' }}
-            draggable={false}
-            alt=""
-            onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); startGifAnimation(); }}
-            onError={() => { mapImageRef.current = null; setMapImage(null); }}
-          />
-        )}
-        {/* Canvas — en premier dans le DOM (z-index inférieur) */}
+      <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', background: '#1c2033', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
+        {/* Map world — <img> DOM visible pour animation GIF native, en dessous du canvas transparent */}
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+          <div ref={mapWorldRef} style={{ position: 'absolute', top: 0, left: 0, transformOrigin: '0 0' }}>
+            {activeMap?.image_path && (
+              <img
+                ref={mapImgElemRef}
+                key={activeMap.id}
+                src={`${import.meta.env.VITE_API_URL}${activeMap.image_path}`}
+                style={{ position: 'absolute', display: 'block', objectFit: 'fill' }}
+                draggable={false}
+                alt=""
+                onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); }}
+                onError={() => { mapImageRef.current = null; setMapImage(null); }}
+              />
+            )}
+          </div>
+        </div>
+        {/* Canvas — transparent, au-dessus de la map HTML, en dessous du token overlay */}
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
