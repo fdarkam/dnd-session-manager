@@ -1328,7 +1328,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       {/* Canvas */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
         {/* Feature 4 — conteneur DOM caché pour les img GIF : le navigateur les anime même hors-écran */}
-        <div ref={gifContainerRef} style={{ position: 'fixed', bottom: 0, right: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden="true" />
+        <div ref={gifContainerRef} style={{ position: 'fixed', top: 0, left: 0, pointerEvents: 'none', visibility: 'hidden' }} aria-hidden="true" />
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
