@@ -21,7 +21,7 @@ import CombatTracker from './CombatTracker';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-const CURSOR_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fb923c', '#a78bfa', '#34d399'];
+const CURSOR_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fb923c', '#a78bfa', '#34d399']; //mettre en random les couleurs
 const userColor = (id) => CURSOR_COLORS[Math.abs((id || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % CURSOR_COLORS.length];
 
 // ─── Floating resizable panel ────────────────────────────────────────────────
@@ -69,17 +69,20 @@ function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
 }
 
 // ─── Token edit panel ─────────────────────────────────────────────────────────
-function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
-  const { token: authToken } = useAuth();
+function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
+  const { token: authToken, user } = useAuth();
+  const canEdit = isDM || !token.createdBy || token.createdBy === user?.id;
   const [name, setName] = useState(token.name || '');
   const [color, setColor] = useState(token.color || '#c9a84c');
   const [borderColor, setBorderColor] = useState(token.borderColor || '#ffffff');
   const [radius, setRadius] = useState(token.radius || 22);
   const [image, setImage] = useState(token.image || null);
+  const [hidden, setHidden] = useState(!!token.hidden);
+  const [locked, setLocked] = useState(!!token.locked);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
-  useEffect(() => { setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff'); setRadius(token.radius || 22); setImage(token.image || null); }, [token.id]);
+  useEffect(() => { setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff'); setRadius(token.radius || 22); setImage(token.image || null); setHidden(!!token.hidden); setLocked(!!token.locked); }, [token.id]);
 
   const handleFile = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -91,7 +94,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
     } catch { /* ignore upload errors */ }
     setUploading(false);
   };
-  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image });
+  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked });
 
   return (
     <div style={{ position: 'absolute', right: 8, top: 8, width: 215, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
@@ -100,24 +103,41 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose }) {
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nom" style={{ fontSize: '0.82rem', padding: '4px 7px' }} onKeyDown={e => e.key === 'Enter' && apply()} />
+        {token.createdByName && (
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Créé par {token.createdByName}</span>
+        )}
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nom" style={{ fontSize: '0.82rem', padding: '4px 7px' }} onKeyDown={e => e.key === 'Enter' && canEdit && apply()} disabled={!canEdit} />
         <div style={{ display: 'flex', gap: '5px', alignItems: 'center', fontSize: '0.78rem' }}>
           <label style={{ color: 'var(--text-muted)' }}>Fond</label>
-          <input type="color" value={color} onChange={e => setColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
+          <input type="color" value={color} onChange={e => setColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.4 }} disabled={!canEdit} />
           <label style={{ color: 'var(--text-muted)' }}>Bord.</label>
-          <input type="color" value={borderColor} onChange={e => setBorderColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
+          <input type="color" value={borderColor} onChange={e => setBorderColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.4 }} disabled={!canEdit} />
         </div>
         <div style={{ display: 'flex', gap: '5px', alignItems: 'center', fontSize: '0.78rem' }}>
           <label style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Rayon px</label>
-          <input type="number" value={radius} onChange={e => setRadius(Number(e.target.value))} min={10} max={120} style={{ width: '55px', padding: '3px 5px', fontSize: '0.8rem' }} />
+          <input type="number" value={radius} onChange={e => setRadius(Number(e.target.value))} min={10} max={120} style={{ width: '55px', padding: '3px 5px', fontSize: '0.8rem' }} disabled={!canEdit} />
         </div>
-        {image && <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><img src={image} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} /><button className="btn btn-sm btn-secondary" style={{ fontSize: '0.72rem' }} onClick={() => setImage(null)}>✕</button></div>}
-        <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current.click()} disabled={uploading} style={{ fontSize: '0.78rem' }}>🖼️ {uploading ? '...' : (image ? 'Changer' : 'Upload image')}</button>
+        {image && <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><img src={image} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} />{canEdit && <button className="btn btn-sm btn-secondary" style={{ fontSize: '0.72rem' }} onClick={() => setImage(null)}>✕</button>}</div>}
+        {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current.click()} disabled={uploading} style={{ fontSize: '0.78rem' }}>🖼️ {uploading ? '...' : (image ? 'Changer' : 'Upload image')}</button>}
         <input ref={fileRef} type="file" accept="image/*,.jfif" onChange={handleFile} style={{ display: 'none' }} />
         <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
-          <button className="btn btn-primary btn-sm" onClick={apply} style={{ flex: 1, fontSize: '0.8rem' }}>Appliquer</button>
-          <button className="btn btn-danger btn-sm" onClick={onDelete} title="Supprimer (Suppr)">🗑️</button>
+          <button className="btn btn-primary btn-sm" onClick={apply} style={{ flex: 1, fontSize: '0.8rem' }} disabled={!canEdit}>Appliquer</button>
+          {(isDM || canEdit) && <button className="btn btn-danger btn-sm" onClick={onDelete} title="Supprimer (Suppr)">🗑️</button>}
         </div>
+        {isDM && (
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <button
+              className={`btn btn-sm ${hidden ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked }); }}
+              style={{ flex: 1, fontSize: '0.73rem' }}
+            >{hidden ? '👁️ Révéler' : '🙈 Masquer'}</button>
+            <button
+              className={`btn btn-sm ${locked ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next }); }}
+              style={{ flex: 1, fontSize: '0.73rem' }}
+            >{locked ? '🔓 Déverr.' : '🔒 Verr.'}</button>
+          </div>
+        )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
       </div>
     </div>
@@ -177,7 +197,6 @@ export default function MapCanvas({ sessionId, isDM }) {
   const isDMRef = useRef(isDM);
   const activeMapRef = useRef(null);
   const otherCursorsRef = useRef({});
-  const snapToGridRef = useRef(false);
   const toolRef = useRef('move');
   const imgCacheRef = useRef({});
 
@@ -199,8 +218,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [fogBrushPx, setFogBrushPx] = useState(40);
   const [fogColor, setFogColor] = useState('#000000');
   const [fogOpacity, setFogOpacity] = useState(0.85);
-  const [snapToGrid, setSnapToGrid] = useState(false);
-  // Toggle visibilité de la grille (indépendant du snap-to-grid)
+  // Toggle visibilité de la grille
   const [showGrid, setShowGrid] = useState(true);
   const showGridRef = useRef(true);
   const [drawing, setDrawing] = useState(false);
@@ -218,9 +236,10 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [newTokenName, setNewTokenName] = useState('');
   const [newTokenColor, setNewTokenColor] = useState('#c9a84c');
   const [newTokenBorderColor, setNewTokenBorderColor] = useState('#ffffff');
-  const [newTokenRadius, setNewTokenRadius] = useState(22);
+  const [newTokenRadius, setNewTokenRadius] = useState(20);
   const newTokenFileRef = useRef();
   const [newTokenImage, setNewTokenImage] = useState(null);
+  const [newTokenHidden, setNewTokenHidden] = useState(false);
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -238,7 +257,6 @@ export default function MapCanvas({ sessionId, isDM }) {
   useEffect(() => { fogCellsRef.current = fogCells; }, [fogCells]);
   useEffect(() => { isDMRef.current = isDM; }, [isDM]);
   useEffect(() => { activeMapRef.current = activeMap; }, [activeMap]);
-  useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { selectedTokenRef.current = selectedToken; }, [selectedToken]);
 
@@ -325,11 +343,16 @@ export default function MapCanvas({ sessionId, isDM }) {
 
     // Tokens — use interpolated visual position when available
     tokensRef.current.forEach(t => {
+      // Players never render hidden tokens (even if one slipped in from a REST API response)
+      if (t.hidden && !dm) return;
+
       const vis = tokenVisualsRef.current[t.id];
       const vx = vis?.x ?? t.x;
       const vy = vis?.y ?? t.y;
       const r = clamp(t.radius || 22, 10, 120);
       const sel = selectedTokenRef.current?.id === t.id;
+
+      if (t.hidden) ctx.globalAlpha = 0.5;
 
       if (sel) {
         ctx.beginPath(); ctx.arc(vx, vy, r + 6 / z, 0, Math.PI * 2);
@@ -359,12 +382,27 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 2.5 / z;
       ctx.strokeText(t.name || '', vx, vy); ctx.fillText(t.name || '', vx, vy);
 
-      // Resize handle on selected token
-      if (sel) {
+      // Resize handle on selected token (not for locked tokens)
+      if (sel && !t.locked) {
         ctx.beginPath(); ctx.arc(vx + r * 0.707, vy + r * 0.707, 5 / z, 0, Math.PI * 2);
         ctx.fillStyle = '#facc15'; ctx.fill();
         ctx.strokeStyle = '#000'; ctx.lineWidth = 1 / z; ctx.stroke();
       }
+
+      // Padlock icon for locked tokens (top-right corner)
+      if (t.locked) {
+        const lx = vx + r * 0.62, ly = vy - r * 0.62;
+        const bw = 7 / z, bh = 5 / z;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(lx - bw / 2 - 1 / z, ly - 1 / z, bw + 2 / z, bh + 2 / z);
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(lx - bw / 2, ly, bw, bh);
+        ctx.beginPath();
+        ctx.arc(lx, ly, bw / 2, Math.PI, 0);
+        ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2 / z; ctx.stroke();
+      }
+
+      if (t.hidden) ctx.globalAlpha = 1;
     });
 
     // Fog cells
@@ -723,11 +761,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     const pan = panOffsetRef.current, z = zoomRef.current;
     return { x: (e.clientX - rect.left - pan.x) / z, y: (e.clientY - rect.top - pan.y) / z };
   };
-  const snapPos = (x, y) => {
-    if (!snapToGridRef.current) return { x, y };
-    const gs = gridSizeRef.current;
-    return { x: Math.round(x / gs) * gs + gs / 2, y: Math.round(y / gs) * gs + gs / 2 };
-  };
+  const snapPos = (x, y) => ({ x, y });
   const paintFog = (wx, wy, adding) => {
     const half = fogBrushPxRef.current / 2, gs = gridSizeRef.current;
     const cx0 = Math.floor((wx - half) / gs), cy0 = Math.floor((wy - half) / gs);
@@ -790,7 +824,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     }
     if (toolRef.current === 'token' && newTokenName.trim()) {
       const sp = snapPos(pos.x, pos.y);
-      const tok = { id: `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`, name: newTokenName, color: newTokenColor, borderColor: newTokenBorderColor, radius: clamp(newTokenRadius, 10, 120), image: newTokenImage, x: sp.x, y: sp.y };
+      const tok = { id: `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`, name: newTokenName, color: newTokenColor, borderColor: newTokenBorderColor, radius: clamp(newTokenRadius, 10, 120), image: newTokenImage, x: sp.x, y: sp.y, hidden: newTokenHidden, createdBy: user.id, createdByName: user.username };
       const upd = [...tokensRef.current, tok]; tokensRef.current = upd; setTokens(upd); drawFrame();
       if (socket) socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current?.id, token: tok, allTokens: upd });
       return;
@@ -801,12 +835,17 @@ export default function MapCanvas({ sessionId, isDM }) {
         const r = clamp(sel.radius || 22, 10, 120);
         const hx = sel.x + r * 0.707, hy = sel.y + r * 0.707;
         const dx = pos.x - hx, dy = pos.y - hy;
-        if (dx * dx + dy * dy <= (12 / zoomRef.current) ** 2) { resizingToken.current = { token: sel }; return; }
+        const canManageSel = isDM || !sel.createdBy || sel.createdBy === user?.id;
+        if (!sel.locked && canManageSel && dx * dx + dy * dy <= (12 / zoomRef.current) ** 2) { resizingToken.current = { token: sel }; return; }
       }
       const clicked = tokensRef.current.find(t => { const r = clamp(t.radius || 22, 10, 120); const dx = t.x - pos.x, dy = t.y - pos.y; return dx * dx + dy * dy <= (r + 5) ** 2; });
       if (clicked) {
         if (selectedTokenRef.current?.id !== clicked.id) setShowTokenEdit(false);
-        dragMoved.current = false; isDraggingRef.current = clicked; setDragging(clicked); selectedTokenRef.current = clicked; setSelectedToken(clicked); return;
+        dragMoved.current = false;
+        selectedTokenRef.current = clicked; setSelectedToken(clicked);
+        const canManage = isDM || !clicked.createdBy || clicked.createdBy === user?.id;
+        if (canManage) { isDraggingRef.current = clicked; setDragging(clicked); }
+        return;
       }
       setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false);
       isPanningRef.current = true; setIsPanning(true);
@@ -866,7 +905,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       tokensRef.current = upd; setTokens(upd);
       const updSel = { ...(selectedTokenRef.current || t), radius: newR }; selectedTokenRef.current = updSel; setSelectedToken(updSel);
       drawFrame();
-      if (socket && now - lastDragEmit.current > 16) { lastDragEmit.current = now; socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: upd, live: true }); }
+      if (socket && now - lastDragEmit.current > 16) { lastDragEmit.current = now; socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: t.id, radius: newR, live: true }); }
       return;
     }
     if (isDrawingRef.current) {
@@ -880,7 +919,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       return;
     }
     if (isPanningRef.current) { const np = { x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y }; panOffsetRef.current = np; drawFrame(); return; }
-    if (isDraggingRef.current) {
+    if (isDraggingRef.current && !isDraggingRef.current.locked) {
       dragMoved.current = true;
       const sp = snapPos(pos.x, pos.y);
       const upd = tokensRef.current.map(t => t.id === isDraggingRef.current.id ? { ...t, ...sp } : t);
@@ -891,7 +930,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       // ← Token drag emit at ~60fps (live=true → no DB write, triggers lerp on receivers)
       if (socket && now - lastDragEmit.current > 16) {
         lastDragEmit.current = now;
-        socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: upd, live: true });
+        socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: isDraggingRef.current.id, x: sp.x, y: sp.y, live: true });
       }
     }
   };
@@ -915,7 +954,10 @@ export default function MapCanvas({ sessionId, isDM }) {
     }
     eraserActive.current = false;
     if (resizingToken.current) {
-      if (socket) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: tokensRef.current, live: false });
+      if (socket) {
+        const resizeTok = tokensRef.current.find(tk => tk.id === resizingToken.current.token.id);
+        if (resizeTok) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: resizeTok.id, radius: resizeTok.radius, live: false });
+      }
       resizingToken.current = null;
     }
     if (drawing && currentPathRef.current.length > 1) {
@@ -932,7 +974,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       const mv = tokensRef.current.find(t => t.id === wasDragging.id);
       if (mv) { selectedTokenRef.current = mv; setSelectedToken(mv); }
       setTokens([...tokensRef.current]); // sync React state once after drag (not per-frame)
-      socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: tokensRef.current, live: false });
+      if (mv) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: wasDragging.id, x: mv.x, y: mv.y, live: false });
     }
     // Single click (no drag) → detect double-click to open edit panel
     if (wasDragging && !dragMoved.current) {
@@ -1077,6 +1119,12 @@ export default function MapCanvas({ sessionId, isDM }) {
                 if (res.ok) { const d = await res.json(); setNewTokenImage(`${VITE_API}${d.path}`); }
               }} style={{ display: 'none' }} />
             {newTokenImage && <button className="btn btn-sm btn-secondary" onClick={() => setNewTokenImage(null)}>✕</button>}
+            {isDM && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.75rem', color: newTokenHidden ? 'var(--accent-primary)' : 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }} title="Placer le token caché (invisible pour les joueurs)">
+                <input type="checkbox" checked={newTokenHidden} onChange={e => setNewTokenHidden(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--accent-primary)' }} />
+                🙈
+              </label>
+            )}
           </div>
         )}
 
@@ -1085,9 +1133,6 @@ export default function MapCanvas({ sessionId, isDM }) {
         {/* Toggle affichage de la grille */}
         <button className={`btn btn-sm ${showGrid ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => { const v = !showGrid; showGridRef.current = v; setShowGrid(v); drawFrame(); }} title={showGrid ? 'Masquer la grille' : 'Afficher la grille'}>▦</button>
-        {/* Toggle alignement sur la grille */}
-        <button className={`btn btn-sm ${snapToGrid ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => { setSnapToGrid(v => !v); snapToGridRef.current = !snapToGrid; }} title="Aligner sur la grille">⊞</button>
 
         {isDM && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -1173,7 +1218,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         />
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
-        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
+        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
       </div>
     </div>
   );

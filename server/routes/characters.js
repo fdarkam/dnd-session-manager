@@ -13,6 +13,9 @@ import { authMiddleware } from '../middleware/auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
+let _io = null;
+export function setIo(io) { _io = io; }
+
 // Multer config for PDF uploads
 const pdfDir = path.join(__dirname, '..', 'uploads', 'pdfs');
 if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
@@ -384,6 +387,11 @@ router.put('/:id/assign', authMiddleware, (req, res) => {
       JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
     `).get(req.params.id);
+
+    // Notify the assigned player in real-time so their character list updates immediately
+    if (_io && assigned_user_id) {
+      _io.to(`user:${assigned_user_id}`).emit('character-assigned', updated);
+    }
 
     res.json(updated);
   } catch (err) {

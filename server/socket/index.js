@@ -24,6 +24,35 @@ export function setupSocket(io) {
     return m?.role === 'dm';
   }
 
+  // Émet map-token-update vers chaque socket de la session avec filtrage des tokens cachés.
+  // excludeSocketId: socket à ignorer (l'émetteur lors des déplacements live).
+  // Préserve les tokens cachés stockés en DB quand un non-MJ envoie une liste partielle.
+  // Sans cette fusion, un joueur qui déplace un token enverrait une liste sans les tokens cachés,
+  // et le serveur écraserait la DB en les effaçant.
+  function mergeWithHidden(mapId, receivedTokens) {
+    try {
+      const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
+      const dbTokens = JSON.parse(map?.tokens || '[]');
+      const hiddenTokens = dbTokens.filter(t => t.hidden);
+      const receivedIds = new Set(receivedTokens.map(t => t.id));
+      return [...receivedTokens, ...hiddenTokens.filter(t => !receivedIds.has(t.id))];
+    } catch { return receivedTokens; }
+  }
+
+  function broadcastTokens(sessionId, mapId, allTokens, live, excludeSocketId) {
+    const room = io.sockets.adapter.rooms.get(sessionId);
+    if (!room) return;
+    for (const socketId of room) {
+      if (excludeSocketId && socketId === excludeSocketId) continue;
+      const s = io.sockets.sockets.get(socketId);
+      if (!s) continue;
+      const tokens = isDM(sessionId, s.user.id)
+        ? allTokens
+        : allTokens.filter(t => !t.hidden);
+      s.emit('map-token-update', { mapId, tokens, live });
+    }
+  }
+
   io.on('connection', (socket) => {
     console.log(`✅ ${socket.user.username} connecté`);
 
@@ -46,8 +75,10 @@ export function setupSocket(io) {
       // Envoyer au socket rejoignant la liste des utilisateurs déjà en ligne dans cette session
       socket.emit('online-users', { sessionId, userIds: [...sessionPresence.get(sessionId)] });
 
-      // Notifier les autres membres qu'un utilisateur vient de rejoindre
-      socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id });
+      // Notifier les autres membres qu'un utilisateur vient de rejoindre (avec son rôle)
+      const joiningRole = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
+        .get(sessionId, socket.user.id)?.role || 'player';
+      socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id, role: joiningRole });
 
       // Envoyer l'état actuel de la map active UNIQUEMENT à ce socket (pas broadcast).
       // Déclenché à chaque join-session, y compris après reconnexion automatique.
@@ -65,9 +96,13 @@ export function setupSocket(io) {
             gridSize = Array.isArray(raw) ? 40 : (raw.gs || 40);
           } catch {}
 
+          const allMapTokens = JSON.parse(activeMap.tokens || '[]');
+          const syncTokens = isDM(sessionId, socket.user.id)
+            ? allMapTokens
+            : allMapTokens.filter(t => !t.hidden);
           socket.emit('map-sync', {
             mapId:    activeMap.id,
-            tokens:   JSON.parse(activeMap.tokens   || '[]'),
+            tokens:   syncTokens,
             drawings: JSON.parse(activeMap.drawings  || '[]'),
             fogCells,
             gridSize,
@@ -150,7 +185,7 @@ export function setupSocket(io) {
       try {
         let tokens;
         if (Array.isArray(allTokens)) {
-          tokens = allTokens;
+          tokens = isDM(sessionId, socket.user.id) ? allTokens : mergeWithHidden(mapId, allTokens);
         } else {
           const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
           tokens = JSON.parse(map?.tokens || '[]');
@@ -158,19 +193,46 @@ export function setupSocket(io) {
           if (idx >= 0) tokens[idx] = newToken; else tokens.push(newToken);
         }
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
-        io.to(sessionId).emit('map-token-update', { mapId, tokens });
+        broadcastTokens(sessionId, mapId, tokens, false, null);
       } catch (err) { console.error('DB token-add error:', err); }
     });
 
     // ---- Token : déplacement — live=true ne persiste pas (drag temps réel) ----
     socket.on('map-token-move', (data) => {
-      const { sessionId, mapId, tokens, live } = data;
+      const { sessionId, mapId, tokenId, x, y, radius, tokens, live } = data;
       if (!isMember(sessionId, socket.user.id)) return;
-      if (!live) {
-        try { db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId); }
-        catch (err) { console.error('DB token-move error:', err); }
+
+      let finalTokens;
+      if (tokenId !== undefined) {
+        // Single-token format: lit la DB pour préserver les tokens hidden
+        try {
+          const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
+          const dbTokens = JSON.parse(map?.tokens || '[]');
+          const target = dbTokens.find(t => t.id === tokenId);
+          if (!target) return;
+          if (!isDM(sessionId, socket.user.id) && target.createdBy !== socket.user.id) return;
+          if (target.locked && !isDM(sessionId, socket.user.id)) return;
+          finalTokens = dbTokens.map(t => {
+            if (t.id !== tokenId) return t;
+            const upd = { ...t };
+            if (x !== undefined) upd.x = x;
+            if (y !== undefined) upd.y = y;
+            if (radius !== undefined) upd.radius = radius;
+            return upd;
+          });
+        } catch (err) { console.error('DB token-move read error:', err); return; }
+      } else {
+        // Format tableau complet (panneau édition MJ, ou legacy)
+        finalTokens = !isDM(sessionId, socket.user.id)
+          ? mergeWithHidden(mapId, tokens || [])
+          : (tokens || []);
       }
-      socket.to(sessionId).emit('map-token-update', { mapId, tokens, live });
+
+      if (!live) {
+        try { db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(finalTokens), mapId); }
+        catch (err) { console.error('DB token-move write error:', err); }
+      }
+      broadcastTokens(sessionId, mapId, finalTokens, live, socket.id);
     });
 
     // ---- Token : suppression ----
@@ -179,9 +241,13 @@ export function setupSocket(io) {
       if (!isMember(sessionId, socket.user.id)) return;
       try {
         const map = db.prepare('SELECT tokens FROM maps WHERE id = ?').get(mapId);
-        const tokens = JSON.parse(map?.tokens || '[]').filter(t => t.id !== tokenId);
+        const allTokens = JSON.parse(map?.tokens || '[]');
+        const target = allTokens.find(t => t.id === tokenId);
+        if (!target) return;
+        if (!isDM(sessionId, socket.user.id) && target.createdBy !== socket.user.id) return;
+        const tokens = allTokens.filter(t => t.id !== tokenId);
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
-        io.to(sessionId).emit('map-token-update', { mapId, tokens });
+        broadcastTokens(sessionId, mapId, tokens, false, null);
       } catch (err) { console.error('DB token-delete error:', err); }
     });
 
