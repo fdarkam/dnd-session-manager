@@ -200,8 +200,6 @@ export default function MapCanvas({ sessionId, isDM }) {
   const activeMapRef = useRef(null);
   const otherCursorsRef = useRef({});
   const toolRef = useRef('move');
-  const imgCacheRef = useRef({});
-
   // ── React state (drives re-render / UI only) ──
   const [maps, setMaps] = useState([]);
   const [activeMap, setActiveMap] = useState(null);
@@ -242,6 +240,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [newTokenRadius, setNewTokenRadius] = useState(20);
   const newTokenFileRef = useRef();
   const prevMapIdRef = useRef(null); // garde contre rechargement de map sur simple rename
+  const tokenWorldRef = useRef(null); // overlay transform (sync pan/zoom canvas)
+  const tokenDivsRef = useRef({});   // map id→div pour updates impératifs pendant lerp
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
 
@@ -289,6 +289,11 @@ export default function MapCanvas({ sessionId, isDM }) {
     ctx.translate(pan.x, pan.y);
     ctx.scale(z, z);
     const W = canvas.width / z, H = canvas.height / z, wx0 = -pan.x / z, wy0 = -pan.y / z;
+
+    // Sync overlay token divs avec le canvas (pan + zoom)
+    if (tokenWorldRef.current) {
+      tokenWorldRef.current.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${z})`;
+    }
 
     // Background
     ctx.fillStyle = '#1c2033';
@@ -345,9 +350,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.beginPath(); ctx.moveTo(cp[0].x, cp[0].y); cp.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
     }
 
-    // Tokens — use interpolated visual position when available
+    // Tokens — rings & handles only; images/name/lock sont dans le token overlay HTML
     tokensRef.current.forEach(t => {
-      // Players never render hidden tokens (even if one slipped in from a REST API response)
       if (t.hidden && !dm) return;
 
       const vis = tokenVisualsRef.current[t.id];
@@ -365,48 +369,10 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.beginPath(); ctx.arc(vx, vy, r + 2 / z, 0, Math.PI * 2);
       ctx.strokeStyle = sel ? '#facc15' : (t.borderColor || '#fff'); ctx.lineWidth = (sel ? 3 : 2) / z; ctx.stroke();
 
-      ctx.save(); ctx.beginPath(); ctx.arc(vx, vy, r, 0, Math.PI * 2); ctx.clip();
-      if (t.image) {
-        const ck = t.id + '_img'; const cache = imgCacheRef.current;
-        const isGif = /\.gif($|\?)/i.test(t.image);
-        if (!isGif && (!cache[ck] || cache[ck + '_src'] !== t.image)) {
-          // Non-GIF : chargement via Image()
-          const io = new Image(); io.crossOrigin = 'anonymous';
-          io.onload = () => { cache[ck] = io; cache[ck + '_src'] = t.image; drawFrame(); };
-          cache[ck] = null; cache[ck + '_src'] = t.image; io.src = t.image;
-        }
-        // GIF : cache[ck] alimenté par le ref callback du overlay React
-        if (cache[ck]) ctx.drawImage(cache[ck], vx - r, vy - r, r * 2, r * 2);
-        else { ctx.fillStyle = t.color || '#c9a84c'; ctx.fill(); }
-      } else { ctx.fillStyle = t.color || '#c9a84c'; ctx.fill(); }
-      ctx.restore();
-
-      // Full name inside — shrink to fit
-      const maxW = r * 1.7; let fs = Math.max(7, Math.round(r * 0.38));
-      ctx.font = `bold ${fs}px Inter,sans-serif`;
-      while (ctx.measureText(t.name || '').width > maxW && fs > 6) { fs--; ctx.font = `bold ${fs}px Inter,sans-serif`; }
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 2.5 / z;
-      ctx.strokeText(t.name || '', vx, vy); ctx.fillText(t.name || '', vx, vy);
-
-      // Resize handle on selected token (not for locked tokens)
       if (sel && !t.locked) {
         ctx.beginPath(); ctx.arc(vx + r * 0.707, vy + r * 0.707, 5 / z, 0, Math.PI * 2);
         ctx.fillStyle = '#facc15'; ctx.fill();
         ctx.strokeStyle = '#000'; ctx.lineWidth = 1 / z; ctx.stroke();
-      }
-
-      // Padlock icon for locked tokens (top-right corner)
-      if (t.locked) {
-        const lx = vx + r * 0.62, ly = vy - r * 0.62;
-        const bw = 7 / z, bh = 5 / z;
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(lx - bw / 2 - 1 / z, ly - 1 / z, bw + 2 / z, bh + 2 / z);
-        ctx.fillStyle = '#facc15';
-        ctx.fillRect(lx - bw / 2, ly, bw, bh);
-        ctx.beginPath();
-        ctx.arc(lx, ly, bw / 2, Math.PI, 0);
-        ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2 / z; ctx.stroke();
       }
 
       if (t.hidden) ctx.globalAlpha = 1;
@@ -468,13 +434,11 @@ export default function MapCanvas({ sessionId, isDM }) {
 
   // ─── Loop RAF dédié aux GIF animés — actif quand lerpAnimation est inactif ──
   const startGifAnimation = useCallback(() => {
-    if (gifAnimRef.current) return; // déjà en cours
+    if (gifAnimRef.current) return;
     const loop = () => {
-      // Vérifier si des tokens GIF sont visibles (visible pour le rôle courant)
-      const hasGif = tokensRef.current.some(t =>
-        t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDMRef.current)
-      );
-      if (!hasGif) { gifAnimRef.current = null; return; } // arrêter si plus de GIF visibles
+      // Loop uniquement si la map background est un GIF (tokens GIF animés via overlay HTML)
+      const hasGifBg = !!(activeMapRef.current?.image_path && /\.gif($|\?)/i.test(activeMapRef.current.image_path));
+      if (!hasGifBg) { gifAnimRef.current = null; return; }
       drawFrame();
       gifAnimRef.current = requestAnimationFrame(loop);
     };
@@ -499,6 +463,16 @@ export default function MapCanvas({ sessionId, isDM }) {
         cursorVisualsRef.current[uid] = { x: lerp(tgt.fromX, tgt.toX, t), y: lerp(tgt.fromY, tgt.toY, t) };
         if (t < 1) active = true;
         else delete cursorLerpsRef.current[uid];
+      });
+      // Sync token overlay div positions (impératif, sans re-render React)
+      Object.entries(tokenVisualsRef.current).forEach(([id, vis]) => {
+        const el = tokenDivsRef.current[id];
+        if (!el) return;
+        const tok = tokensRef.current.find(t => t.id === id);
+        if (!tok) return;
+        const r = clamp(tok.radius || 22, 10, 120);
+        el.style.left = `${vis.x - r}px`;
+        el.style.top = `${vis.y - r}px`;
       });
       drawFrame();
       lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
@@ -755,12 +729,6 @@ export default function MapCanvas({ sessionId, isDM }) {
     const x = map.img_x || 0, y = map.img_y || 0, s = map.img_scale || 1;
     setImgX(x); setImgY(y); setImgScale(s);
   };
-
-  // Démarrer la boucle d'animation GIF dès que des tokens GIF sont présents
-  useEffect(() => {
-    const hasGif = tokens.some(t => t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDM));
-    if (hasGif) startGifAnimation();
-  }, [tokens, isDM, startGifAnimation]);
 
   const fetchMaps = useCallback(async () => {
     const res = await fetch(`${API}/maps/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1324,37 +1292,62 @@ export default function MapCanvas({ sessionId, isDM }) {
 
       {/* Canvas */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
-        {/* GIF overlay — img DOM éléments rendus par React : le navigateur anime les frames nativement */}
-        <div style={{ position: 'absolute', top: 0, left: 0, opacity: 0.001, pointerEvents: 'none', zIndex: -1 }} aria-hidden="true">
-          {tokens.filter(t => t.image && /\.gif($|\?)/i.test(t.image) && (!t.hidden || isDM)).map(t => (
-            <img
-              key={t.id + '_gifdom'}
-              src={t.image}
-              ref={el => { if (el) imgCacheRef.current[t.id + '_img'] = el; else delete imgCacheRef.current[t.id + '_img']; }}
-              onLoad={e => { imgCacheRef.current[t.id + '_img'] = e.currentTarget; drawFrame(); startGifAnimation(); }}
-              style={{ position: 'absolute', width: 8, height: 8 }}
-              draggable={false}
-              alt=""
-            />
-          ))}
-          {activeMap?.image_path && /\.gif($|\?)/i.test(activeMap.image_path) && (
-            <img
-              key="mapbg_gif"
-              src={`${import.meta.env.VITE_API_URL}${activeMap.image_path}`}
-              style={{ position: 'absolute', width: 8, height: 8 }}
-              draggable={false}
-              alt=""
-              onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); startGifAnimation(); }}
-              onError={() => { mapImageRef.current = null; setMapImage(null); }}
-            />
-          )}
-        </div>
+        {/* Map background GIF — img en DOM pour que Chrome avance les frames */}
+        {activeMap?.image_path && /\.gif($|\?)/i.test(activeMap.image_path) && (
+          <img
+            src={`${import.meta.env.VITE_API_URL}${activeMap.image_path}`}
+            style={{ position: 'absolute', width: 1, height: 1, opacity: 0.001, willChange: 'transform', pointerEvents: 'none' }}
+            draggable={false}
+            alt=""
+            onLoad={e => { mapImageRef.current = e.currentTarget; setMapImage(e.currentTarget); drawFrame(); startGifAnimation(); }}
+            onError={() => { mapImageRef.current = null; setMapImage(null); }}
+          />
+        )}
+        {/* Canvas — en premier dans le DOM (z-index inférieur) */}
         <canvas ref={canvasRef}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           onContextMenu={e => e.preventDefault()}
           style={{ width: '100%', height: '100%', display: 'block' }}
         />
+        {/* Token overlay — après le canvas dans le DOM = au-dessus du canvas (z-index supérieur) */}
+        {/* pointer-events:none → les clics passent à travers au canvas */}
+        {/* Les tokens dans le brouillard ont opacity:0, cachés par le brouillard dessiné sur le canvas */}
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+          <div ref={tokenWorldRef} style={{ position: 'absolute', top: 0, left: 0, transformOrigin: '0 0' }}>
+            {tokens.filter(t => !t.hidden || isDM).map(t => {
+              const r = clamp(t.radius || 22, 10, 120);
+              const inFog = !isDM && gridSize > 0 && fogCells.has(`${Math.floor(t.x / gridSize)},${Math.floor(t.y / gridSize)}`);
+              return (
+                <div
+                  key={t.id}
+                  ref={el => { if (el) tokenDivsRef.current[t.id] = el; else delete tokenDivsRef.current[t.id]; }}
+                  style={{
+                    position: 'absolute',
+                    left: t.x - r,
+                    top: t.y - r,
+                    width: r * 2,
+                    height: r * 2,
+                    borderRadius: '50%',
+                    overflow: 'hidden',
+                    opacity: inFog ? 0 : (t.hidden ? 0.5 : 1),
+                  }}
+                >
+                  {t.image
+                    ? <img src={t.image} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} alt="" />
+                    : <div style={{ width: '100%', height: '100%', background: t.color || '#c9a84c' }} />
+                  }
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ color: '#fff', fontSize: `${Math.max(7, Math.round(r * 0.38))}px`, fontWeight: 'bold', textShadow: '0 0 3px rgba(0,0,0,0.8)', textAlign: 'center', maxWidth: '90%', lineHeight: 1.1, wordBreak: 'break-word', userSelect: 'none' }}>{t.name}</span>
+                  </div>
+                  {t.locked && (
+                    <span style={{ position: 'absolute', top: '6%', right: '6%', fontSize: `${Math.max(8, Math.round(r * 0.3))}px`, lineHeight: 1, userSelect: 'none' }}>🔒</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
         {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
