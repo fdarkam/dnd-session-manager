@@ -558,26 +558,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.fill(fogPath);
     }
 
-    // Other players' cursors — lerped positions, hidden in fog for non-DM
-    Object.values(otherCursorsRef.current).forEach(c => {
-      const vis = cursorVisualsRef.current[c.userId];
-      const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
-      // Curseur du MJ invisible pour les joueurs — les joueurs ne savent pas où regarde le MJ
-      if (!dm && c.isDM) return;
-      // Players cannot see cursors hidden behind fog
-      if (!dm) {
-        const cellKey = `${Math.floor(cx / gs)},${Math.floor(cy / gs)}`;
-        if (fc.has(cellKey)) return;
-      }
-      const col = userColor(c.userId);
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + 12 / z, cy + 4 / z); ctx.lineTo(cx + 4 / z, cy + 12 / z); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.5 / z; ctx.stroke();
-      ctx.fillStyle = col; ctx.font = `bold ${9 / z}px Inter,sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(c.username, cx + 14 / z, cy + 4 / z);
-    });
-
-    // Ping animations — ease-out with 3 rings + impact dot
+    // Ping animations — ease-out with 3 rings + impact dot (avant les curseurs)
     const now = Date.now();
     pingAnimRef.current = pingAnimRef.current.filter(p => now - p.ts < 2000);
     pingAnimRef.current.forEach(p => {
@@ -596,6 +577,25 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (age < 0.25) { const ia = age / 0.25; ctx.beginPath(); ctx.arc(p.x, p.y, (7 * (1 - ia)) / z, 0, Math.PI * 2); ctx.fillStyle = `rgba(250,204,21,${1 - ia})`; ctx.fill(); }
     });
     if (pingAnimRef.current.length > 0) requestAnimationFrame(drawFrame);
+
+    // Curseurs des autres joueurs — EN DERNIER, au-dessus de tout (fog, tokens, pings)
+    Object.values(otherCursorsRef.current).forEach(c => {
+      const vis = cursorVisualsRef.current[c.userId];
+      const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
+      // Curseur du MJ invisible pour les joueurs — les joueurs ne savent pas où regarde le MJ
+      if (!dm && c.isDM) return;
+      // Players cannot see cursors hidden behind fog
+      if (!dm) {
+        const cellKey = `${Math.floor(cx / gs)},${Math.floor(cy / gs)}`;
+        if (fc.has(cellKey)) return;
+      }
+      const col = userColor(c.userId);
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + 12 / z, cy + 4 / z); ctx.lineTo(cx + 4 / z, cy + 12 / z); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.5 / z; ctx.stroke();
+      ctx.fillStyle = col; ctx.font = `bold ${9 / z}px Inter,sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(c.username, cx + 14 / z, cy + 4 / z);
+    });
 
     ctx.restore();
   }, []); // ← empty deps: all data comes from refs
