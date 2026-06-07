@@ -3,6 +3,18 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../db.js';
 import { JWT_SECRET } from '../middleware/auth.js';
 
+// Set des userId dont le pseudo est en cours de mise à jour.
+// Permet de distinguer une vraie déconnexion d'une reconnexion technique
+// déclenchée par le re-emit de JWT après un changement de pseudo.
+const profileUpdatingUsers = new Set();
+
+// Appelée par auth.js avant d'émettre username-updated.
+// TTL de 10 s : nettoyage automatique si le socket ne se reconnecte pas (sécurité).
+export function markUserUpdating(userId) {
+  profileUpdatingUsers.add(userId);
+  setTimeout(() => profileUpdatingUsers.delete(userId), 10000);
+}
+
 export function setupSocket(io) {
   // Authentification JWT sur chaque connexion socket
   io.use((socket, next) => {
@@ -76,9 +88,14 @@ export function setupSocket(io) {
       socket.emit('online-users', { sessionId, userIds: [...sessionPresence.get(sessionId)] });
 
       // Notifier les autres membres qu'un utilisateur vient de rejoindre (avec son rôle)
+      // Sauf si c'est une reconnexion technique suite à un changement de pseudo
       const joiningRole = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?')
         .get(sessionId, socket.user.id)?.role || 'player';
-      socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id, role: joiningRole });
+      if (!profileUpdatingUsers.has(socket.user.id)) {
+        socket.to(sessionId).emit('user-joined', { username: socket.user.username, id: socket.user.id, role: joiningRole });
+      }
+      // Consommer le flag une fois la reconnexion absorbée
+      profileUpdatingUsers.delete(socket.user.id);
 
       // Envoyer l'état actuel de la map active UNIQUEMENT à ce socket (pas broadcast).
       // Déclenché à chaque join-session, y compris après reconnexion automatique.
@@ -476,9 +493,12 @@ export function setupSocket(io) {
           users.delete(socket.user.id);
           if (users.size === 0) sessionPresence.delete(socket.sessionId);
         }
-        socket.to(socket.sessionId).emit('user-left', {
-          username: socket.user.username, id: socket.user.id
-        });
+        // Ne pas émettre user-left si c'est une reconnexion technique (changement de pseudo)
+        if (!profileUpdatingUsers.has(socket.user.id)) {
+          socket.to(socket.sessionId).emit('user-left', {
+            username: socket.user.username, id: socket.user.id
+          });
+        }
       }
       console.log(`❌ ${socket.user.username} déconnecté`);
     });

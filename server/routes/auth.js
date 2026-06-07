@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db.js';
 import { JWT_SECRET, authMiddleware } from '../middleware/auth.js';
+import { markUserUpdating } from '../socket/index.js';
 
 const router = Router();
 
@@ -92,6 +93,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
     // Re-issue token with new username so client stays valid
     const newToken = jwt.sign({ id: req.user.id, username: trimmed }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token: newToken, user: { id: req.user.id, username: trimmed } });
+    // Marquer l'utilisateur comme "en cours de mise à jour" avant la notification socket
+    // pour que join-session / disconnect ignorent les faux user-left/user-joined
+    markUserUpdating(req.user.id);
     // Notifier tous les clients connectés du changement de pseudo
     if (io) io.emit('username-updated', { userId: req.user.id, newUsername: trimmed });
   } catch (err) {
