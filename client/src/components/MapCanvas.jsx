@@ -245,6 +245,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const otherCursorsRef = useRef({});
   const toolRef = useRef('move');
   const copiedTokenRef = useRef(null);   // token copié via Ctrl+C
+  const mouseWorldPosRef = useRef({ x: 0, y: 0 }); // position monde courante de la souris
   const undoStackRef = useRef([]);       // pile d'annulation (max 20 entrées)
   const redoStackRef = useRef([]);       // pile de rétablissement
   // ── React state (drives re-render / UI only) ──
@@ -523,12 +524,13 @@ export default function MapCanvas({ sessionId, isDM }) {
         return;
       }
 
-      // Ctrl+V — coller le token copié avec décalage +30px
+      // Ctrl+V — coller le token copié à la position courante de la souris
       if (e.ctrlKey && e.key === 'v') {
         if (!copiedTokenRef.current) return;
         e.preventDefault();
         saveUndoState();
-        const newToken = { ...copiedTokenRef.current, id: crypto.randomUUID(), x: copiedTokenRef.current.x + 30, y: copiedTokenRef.current.y + 30, hidden: false };
+        const { x, y } = mouseWorldPosRef.current;
+        const newToken = { ...copiedTokenRef.current, id: crypto.randomUUID(), x, y, hidden: false };
         tokensRef.current = [...tokensRef.current, newToken];
         setTokens([...tokensRef.current]);
         drawFrame();
@@ -978,6 +980,7 @@ export default function MapCanvas({ sessionId, isDM }) {
 
   const handleMouseMove = (e) => {
     const pos = getWorldPos(e);
+    mouseWorldPosRef.current = pos;
     const now = Date.now();
 
     // Broadcast cursor position (throttled 100ms)
