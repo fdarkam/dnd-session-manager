@@ -497,6 +497,8 @@ export default function CombatTracker({ sessionId, isDM }) {
             const statuses = entity.statuses || [];
             const flash = hpFlash[entity.id];
             const canEdit = canEditEntity(entity);
+            // Fix 1 : les joueurs ne voient pas les PV des ennemis
+            const showHp = isDM || entity.type !== 'enemy';
 
             /*
               Fix layout — chaque entité est désormais une colonne (flex-direction: column).
@@ -559,9 +561,10 @@ export default function CombatTracker({ sessionId, isDM }) {
                     />
                   </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {entity.hp}/{hpMax} PV
+                    {/* PV masqués pour les ennemis côté joueur — le MJ voit toujours tout */}
+                    {showHp ? `${entity.hp}/${hpMax} PV` : '??? PV'}
                     {/* Flash vert (soins) ou rouge (dégâts) après application */}
-                    {flash && (
+                    {showHp && flash && (
                       <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
                         {flash.text}
                       </span>
@@ -582,7 +585,8 @@ export default function CombatTracker({ sessionId, isDM }) {
                   Visible en permanence si le joueur peut éditer l'entité
                   Même style pill group que précédemment (bordures partagées, coins arrondis extérieurs)
                 */}
-                {canEdit && (
+                {/* Input PV masqué pour les ennemis si le joueur ne peut pas voir leurs PV */}
+                {canEdit && showHp && (
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <input
                       type="text"

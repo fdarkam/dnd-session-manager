@@ -562,6 +562,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     Object.values(otherCursorsRef.current).forEach(c => {
       const vis = cursorVisualsRef.current[c.userId];
       const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
+      // Curseur du MJ invisible pour les joueurs — les joueurs ne savent pas où regarde le MJ
+      if (!dm && c.isDM) return;
       // Players cannot see cursors hidden behind fog
       if (!dm) {
         const cellKey = `${Math.floor(cx / gs)},${Math.floor(cy / gs)}`;
@@ -872,10 +874,11 @@ export default function MapCanvas({ sessionId, isDM }) {
       setMaps(prev => { const next = prev.filter(m => m.id !== mapId); if (activeMapRef.current?.id === mapId) setActiveMap(next[0] || null); return next; });
     };
     const onMapListUpdated = () => { fetchMapsRef.current?.(); };
-    const onCursorUpdate = ({ userId, username, x, y }) => {
+    const onCursorUpdate = ({ userId, username, x, y, isDM: cursorIsDM }) => {
       const vis = cursorVisualsRef.current[userId] || { x, y };
       cursorLerpsRef.current[userId] = { fromX: vis.x, fromY: vis.y, toX: x, toY: y, startTime: Date.now(), duration: 100 };
-      otherCursorsRef.current = { ...otherCursorsRef.current, [userId]: { userId, username, x, y } };
+      // Stocker isDM pour que drawFrame puisse filtrer le curseur du MJ côté joueurs
+      otherCursorsRef.current = { ...otherCursorsRef.current, [userId]: { userId, username, x, y, isDM: cursorIsDM } };
       startLerpAnimation();
     };
     // Mise à jour du label du curseur si l'utilisateur est présent sur la carte

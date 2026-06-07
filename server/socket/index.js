@@ -430,8 +430,10 @@ export function setupSocket(io) {
     // ---- Curseurs en temps réel ----
     socket.on('cursor-move', (data) => {
       const { sessionId, x, y } = data;
+      // Inclure isDM dans le payload — les joueurs filtrent le curseur du MJ côté client
       socket.to(sessionId).emit('cursor-update', {
-        userId: socket.user.id, username: socket.user.username, x, y
+        userId: socket.user.id, username: socket.user.username, x, y,
+        isDM: isDM(sessionId, socket.user.id),
       });
     });
 
