@@ -435,8 +435,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
     }
 
-    // Grille — affichée seulement si showGridRef est activé
-    if (showGridRef.current) {
+    // Grille — MJ toujours, joueurs uniquement en l'absence de fog (évite la grille visible à travers le fog)
+    if (showGridRef.current && (dm || fc.size === 0)) {
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = 0.5 / z;
       const gx0 = Math.floor(wx0 / gs) * gs, gy0 = Math.floor(wy0 / gs) * gs;
