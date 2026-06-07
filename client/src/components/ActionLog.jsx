@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { formatDate } from '../utils/date';
 
 export default function ActionLog({ sessionId }) {
   const { token } = useAuth();
@@ -37,12 +38,7 @@ export default function ActionLog({ sessionId }) {
     }
   };
 
-  const formatTime = (ts) => {
-    const d = new Date(ts);
-    return d.toLocaleString('fr-FR', {
-      hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'
-    });
-  };
+  const formatTime = (ts) => formatDate(ts);
 
   return (
     <div className="animate-fade-in">
