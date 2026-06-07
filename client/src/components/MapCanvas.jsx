@@ -474,13 +474,19 @@ export default function MapCanvas({ sessionId, isDM }) {
     // pour éviter qu'ils soient cachés sous les divs HTML à z-index supérieur
 
     // ─── Fog simplifié : 2 états uniquement — fogCellsRef (80%) ou rien ─────
+    // Path2D fusionne toutes les cellules adjacentes en un seul tracé avant ctx.fill(),
+    // ce qui évite les légères variations d'opacité entre cellules qui créaient un effet de quadrillage.
     if (dm) {
       // MJ : fog semi-transparent (voit toujours tout) + cercles de vision debug
       if (fc.size > 0) {
         const hex = fogColorRef.current.replace('#', '');
         const fr = parseInt(hex.slice(0, 2), 16), fg = parseInt(hex.slice(2, 4), 16), fb = parseInt(hex.slice(4, 6), 16);
+        // Construire un Path2D unique : toutes les cellules fusionnées en un seul tracé
+        const fogPath = new Path2D();
+        fc.forEach(key => { const [cx, cy] = key.split(',').map(Number); fogPath.rect(cx * gs, cy * gs, gs, gs); });
+        // Un seul fill() = opacité uniforme, pas de bordures entre cellules adjacentes
         ctx.fillStyle = `rgba(${fr},${fg},${fb},${Math.min(fogOpacityRef.current, 0.65)})`;
-        fc.forEach(key => { const [cx, cy] = key.split(',').map(Number); ctx.fillRect(cx * gs, cy * gs, gs, gs); });
+        ctx.fill(fogPath);
       }
       // Cercles de vision des tokens joueurs — aide le MJ à visualiser les zones révélées
       if (gs > 0) {
@@ -493,9 +499,10 @@ export default function MapCanvas({ sessionId, isDM }) {
         });
       }
     } else if (gs > 0 && fc.size > 0) {
-      // Joueurs : fog MJ à 80%, limité aux bounds de l'image de la map
+      // Joueurs : fog opaque à 80%, limité aux bounds de l'image de la map
+      // Path2D unique = un seul ctx.fill() → pas d'effet grille entre cellules adjacentes
+      const fogPath = new Path2D();
       const img = mapImageRef.current;
-      ctx.fillStyle = 'rgba(0,0,0,0.8)';
       if (img) {
         const imgLeft   = imgXRef.current;
         const imgTop    = imgYRef.current;
@@ -504,15 +511,18 @@ export default function MapCanvas({ sessionId, isDM }) {
         fc.forEach(key => {
           const [cx, cy] = key.split(',').map(Number);
           const px = cx * gs, py = cy * gs;
-          if (px >= imgLeft && px < imgRight && py >= imgTop && py < imgBottom)
-            ctx.fillRect(px - 0.5, py - 0.5, gs + 1, gs + 1);
+          // Inclure uniquement les cellules dans les bounds de l'image
+          if (px + gs > imgLeft && px < imgRight && py + gs > imgTop && py < imgBottom)
+            fogPath.rect(px, py, gs, gs);
         });
       } else {
         fc.forEach(key => {
           const [cx, cy] = key.split(',').map(Number);
-          ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
+          fogPath.rect(cx * gs, cy * gs, gs, gs);
         });
       }
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.fill(fogPath);
     }
 
     // Other players' cursors — lerped positions, hidden in fog for non-DM
