@@ -117,8 +117,8 @@ function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
   );
 }
 
-// ─── Token edit panel ─────────────────────────────────────────────────────────
-function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
+// ─── Token edit panel (draggable) ────────────────────────────────────────────
+function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }) {
   const { token: authToken, user } = useAuth();
   const canEdit = isDM || !token.createdBy || token.createdBy === user?.id;
   const [name, setName] = useState(token.name || '');
@@ -128,11 +128,49 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
   const [image, setImage] = useState(token.image || null);
   const [hidden, setHidden] = useState(!!token.hidden);
   const [locked, setLocked] = useState(!!token.locked);
-  const [nightVision, setNightVision] = useState(!!token.nightVision); // vision nocturne étendue
+  const [nightVision, setNightVision] = useState(!!token.nightVision);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
-  useEffect(() => { setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff'); setRadius(token.radius || 22); setImage(token.image || null); setHidden(!!token.hidden); setLocked(!!token.locked); setNightVision(!!token.nightVision); }, [token.id]);
+  // Fix 4: position draggable
+  const [pos, setPos] = useState(initialPos || { x: 8, y: 8 });
+  const dragRef = useRef(false);
+  const oriRef = useRef({});
+
+  useEffect(() => {
+    setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff');
+    setRadius(token.radius || 22); setImage(token.image || null); setHidden(!!token.hidden);
+    setLocked(!!token.locked); setNightVision(!!token.nightVision);
+  }, [token.id]);
+
+  // Repositionner quand un token différent est ouvert
+  useEffect(() => { if (initialPos) setPos(initialPos); }, [token.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startDrag = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, select, textarea, a, label')) return;
+    dragRef.current = true;
+    document.body.style.cursor = 'grabbing';
+    document.documentElement.style.userSelect = 'none';
+    oriRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
+    const mv = (ev) => {
+      if (!dragRef.current) return;
+      setPos({
+        x: Math.max(0, oriRef.current.px + ev.clientX - oriRef.current.mx),
+        y: Math.max(0, oriRef.current.py + ev.clientY - oriRef.current.my),
+      });
+    };
+    const up = () => {
+      dragRef.current = false;
+      document.body.style.cursor = '';
+      document.documentElement.style.userSelect = '';
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+    e.preventDefault();
+  };
 
   const handleFile = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -141,14 +179,15 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
       const fd = new FormData(); fd.append('image', f);
       const res = await fetch(`${API}/maps/token-image`, { method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd });
       if (res.ok) { const data = await res.json(); setImage(`${VITE_API}${data.path}`); }
-    } catch { /* ignore upload errors */ }
+    } catch { /* ignore */ }
     setUploading(false);
   };
   const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision });
 
   return (
-    <div style={{ position: 'absolute', right: 8, top: 8, width: 215, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+    <div style={{ position: 'absolute', left: pos.x, top: pos.y, width: 240, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
+      {/* En-tête draggable */}
+      <div onMouseDown={startDrag} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', cursor: 'grab', userSelect: 'none' }}>
         <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.8rem', fontFamily: 'var(--font-heading)' }}>Modifier token</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
       </div>
@@ -162,10 +201,8 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
           <input type="color" value={color} onChange={e => setColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.4 }} disabled={!canEdit} />
           <label style={{ color: 'var(--text-muted)' }}>Bord.</label>
           <input type="color" value={borderColor} onChange={e => setBorderColor(e.target.value)} style={{ width: '26px', height: '22px', padding: 0, border: 'none', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.4 }} disabled={!canEdit} />
-        </div>
-        <div style={{ display: 'flex', gap: '5px', alignItems: 'center', fontSize: '0.78rem' }}>
-          <label style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Rayon px</label>
-          <input type="number" value={radius} onChange={e => setRadius(Number(e.target.value))} min={10} max={120} style={{ width: '55px', padding: '3px 5px', fontSize: '0.8rem' }} disabled={!canEdit} />
+          <label style={{ color: 'var(--text-muted)', marginLeft: 'auto', flexShrink: 0 }}>Rayon px</label>
+          <input type="number" value={radius} onChange={e => setRadius(Number(e.target.value))} min={10} max={120} style={{ width: '50px', padding: '3px 5px', fontSize: '0.8rem' }} disabled={!canEdit} />
         </div>
         {image && <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><img src={image} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} />{canEdit && <button className="btn btn-sm btn-secondary" style={{ fontSize: '0.72rem' }} onClick={() => setImage(null)}>✕</button>}</div>}
         {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current.click()} disabled={uploading} style={{ fontSize: '0.78rem' }}>🖼️ {uploading ? '...' : (image ? 'Changer' : 'Upload image')}</button>}
@@ -175,24 +212,43 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM }) {
           {(isDM || canEdit) && <button className="btn btn-danger btn-sm" onClick={onDelete} title="Supprimer (Suppr)">🗑️</button>}
         </div>
         {isDM && (
-          <div style={{ display: 'flex', gap: '5px' }}>
-            <button
-              className={`btn btn-sm ${hidden ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked, nightVision }); }}
-              style={{ flex: 1, fontSize: '0.73rem' }}
-            >{hidden ? '👁️ Révéler' : '🙈 Masquer'}</button>
-            <button
-              className={`btn btn-sm ${locked ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next, nightVision }); }}
-              style={{ flex: 1, fontSize: '0.73rem' }}
-            >{locked ? '🔓 Déverr.' : '🔒 Verr.'}</button>
-            <button
-              className={`btn btn-sm ${nightVision ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { const next = !nightVision; setNightVision(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: next }); }}
-              style={{ flex: 1, fontSize: '0.73rem' }}
-              title="Vision nocturne — radius de vision étendu à 6 cases"
-            >{nightVision ? '🌙 Nuit ✓' : '🌙 Nuit'}</button>
-          </div>
+          <>
+            {/* Fix 3: Masquer | Verr. | Nuit dans la même rangée */}
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <button
+                className={`btn btn-sm ${hidden ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked, nightVision }); }}
+                style={{ flex: 1, fontSize: '0.73rem' }}
+              >{hidden ? '👁️ Révéler' : '🙈 Masquer'}</button>
+              <button
+                className={`btn btn-sm ${locked ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next, nightVision }); }}
+                style={{ flex: 1, fontSize: '0.73rem' }}
+              >{locked ? '🔓 Déverr.' : '🔒 Verr.'}</button>
+              <button
+                className={`btn btn-sm ${nightVision ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => { const next = !nightVision; setNightVision(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: next }); }}
+                style={{ flex: 1, fontSize: '0.73rem' }}
+                title="Vision nocturne — radius de vision étendu à 6 cases"
+              >{nightVision ? '🌙 Nuit ✓' : '🌙 Nuit'}</button>
+            </div>
+            {/* Fix 3: radio Vision Normal / Étendu */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.75rem', padding: '2px 0' }}>
+              <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Vision :</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: !nightVision ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                <input type="radio" name={`vision-${token.id}`} checked={!nightVision}
+                  onChange={() => { setNightVision(false); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: false }); }}
+                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
+                Normal
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: nightVision ? 'var(--accent-primary)' : 'var(--text-muted)' }}>
+                <input type="radio" name={`vision-${token.id}`} checked={nightVision}
+                  onChange={() => { setNightVision(true); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: true }); }}
+                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
+                Étendu
+              </label>
+            </div>
+          </>
         )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
       </div>
@@ -262,7 +318,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   // ── Fog automatique ──
   const exploredCellsRef  = useRef(new Set()); // cellules déjà visitées par les joueurs (mémorisées)
   const visibleCellsRef   = useRef(new Set()); // cellules actuellement dans le champ de vision
-  const autoFogEnabledRef = useRef(false);     // fog automatique activé (synché avec state)
+  const autoFogEnabledRef = useRef(true);      // fog automatique activé (synché avec state)
   const lastFogUpdateRef  = useRef(0);         // throttle du recalcul fog auto (100ms)
   // ── React state (drives re-render / UI only) ──
   const [maps, setMaps] = useState([]);
@@ -310,8 +366,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   const mapImgElemRef = useRef(null); // <img> DOM de la map background
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
-  const [autoFogEnabled, setAutoFogEnabled] = useState(false); // fog automatique actif
+  const [autoFogEnabled, setAutoFogEnabled] = useState(true);  // fog automatique actif par défaut
   const [visibleCells, setVisibleCells] = useState(new Set()); // cellules visibles (pour token overlay)
+  const [tokenEditPos, setTokenEditPos] = useState(null);      // position initiale du panneau d'édition de token
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -929,8 +986,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       const cells    = Array.isArray(raw) ? raw        : (raw.cells    || []);
       const gs       = Array.isArray(raw) ? null       : raw.gs;
       // Champs fog automatique (format étendu : {cells, gs, explored, autoFog})
-      const explored = Array.isArray(raw) ? []         : (raw.explored  || []);
-      const afe      = Array.isArray(raw) ? false      : (raw.autoFog   || false);
+      const explored = Array.isArray(raw) ? []    : (raw.explored ?? []);
+      const afe      = Array.isArray(raw) ? true  : (raw.autoFog  ?? true); // true par défaut si jamais sauvegardé
       const s = new Set(cells);
       fogCellsRef.current = s; setFogCells(s);
       exploredCellsRef.current = new Set(explored);
@@ -1193,6 +1250,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (autoFogEnabledRef.current && gridSizeRef.current > 0 && now - lastFogUpdateRef.current > 100) {
         lastFogUpdateRef.current = now;
         computeVisibleCells();
+        drawFrame(); // redessiner immédiatement après le recalcul pour que le fog disparaisse en temps réel
         if (socket) {
           socket.emit('map-fog-explored', {
             sessionId,
@@ -1261,6 +1319,21 @@ export default function MapCanvas({ sessionId, isDM }) {
       const now = Date.now();
       const last = tokenLastClickRef.current;
       if (last.id === wasDragging.id && (now - last.time) < 350) {
+        // Calculer la position initiale du panneau d'édition près du token (Fix 4)
+        const tok = tokensRef.current.find(t => t.id === wasDragging.id);
+        if (tok) {
+          const z = zoomRef.current;
+          const pan = panOffsetRef.current;
+          const r = clamp(tok.radius || 22, 10, 120);
+          const panelW = 248;
+          const contW = containerRef.current?.clientWidth || 600;
+          const contH = containerRef.current?.clientHeight || 400;
+          const tokSx = tok.x * z + pan.x;
+          const tokSy = tok.y * z + pan.y;
+          const sx = (tokSx + r + 12 + panelW < contW) ? tokSx + r + 12 : Math.max(8, tokSx - r - panelW - 12);
+          const sy = Math.max(8, Math.min(contH - 280, tokSy - r));
+          setTokenEditPos({ x: Math.max(8, sx), y: sy });
+        }
         setShowTokenEdit(true);
       }
       tokenLastClickRef.current = { id: wasDragging.id, time: now };
@@ -1632,7 +1705,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         </div>
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
-        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} />}
+        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} />}
       </div>
     </div>
   );
