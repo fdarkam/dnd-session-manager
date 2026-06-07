@@ -435,8 +435,8 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
     }
 
-    // Grille — MJ toujours, joueurs uniquement en l'absence de fog (évite la grille visible à travers le fog)
-    if (showGridRef.current && (dm || fc.size === 0)) {
+    // Grille — toujours dessinée avant le fog ; le fog la recouvrira dans les zones fogées
+    if (showGridRef.current) {
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = 0.5 / z;
       const gx0 = Math.floor(wx0 / gs) * gs, gy0 = Math.floor(wy0 / gs) * gs;
