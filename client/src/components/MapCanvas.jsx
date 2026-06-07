@@ -481,9 +481,20 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (fc.size > 0) {
         const hex = fogColorRef.current.replace('#', '');
         const fr = parseInt(hex.slice(0, 2), 16), fg = parseInt(hex.slice(2, 4), 16), fb = parseInt(hex.slice(4, 6), 16);
-        // Construire un Path2D unique : toutes les cellules fusionnées en un seul tracé
+        // Construire un Path2D unique : cellules fusionnées, limitées aux bounds de l'image
         const fogPath = new Path2D();
-        fc.forEach(key => { const [cx, cy] = key.split(',').map(Number); fogPath.rect(cx * gs, cy * gs, gs, gs); });
+        const fImg = mapImageRef.current;
+        const fLeft   = fImg ? imgXRef.current : -Infinity;
+        const fRight  = fImg ? imgXRef.current + fImg.naturalWidth  * imgScaleRef.current : Infinity;
+        const fTop    = fImg ? imgYRef.current : -Infinity;
+        const fBottom = fImg ? imgYRef.current + fImg.naturalHeight * imgScaleRef.current : Infinity;
+        fc.forEach(key => {
+          const [cx, cy] = key.split(',').map(Number);
+          const px = cx * gs, py = cy * gs;
+          // Exclure les cellules hors bounds de la map (ne peuvent pas exister mais sécurité défensive)
+          if (px + gs > fLeft && px < fRight && py + gs > fTop && py < fBottom)
+            fogPath.rect(px, py, gs, gs);
+        });
         // Un seul fill() = opacité uniforme, pas de bordures entre cellules adjacentes
         ctx.fillStyle = `rgba(${fr},${fg},${fb},${Math.min(fogOpacityRef.current, 0.65)})`;
         ctx.fill(fogPath);
@@ -1024,7 +1035,25 @@ export default function MapCanvas({ sessionId, isDM }) {
     const cx0 = Math.floor((wx - half) / gs), cy0 = Math.floor((wy - half) / gs);
     const cx1 = Math.floor((wx + half) / gs), cy1 = Math.floor((wy + half) / gs);
     const next = new Set(fogCellsRef.current);
-    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) adding ? next.add(`${cx},${cy}`) : next.delete(`${cx},${cy}`);
+    // Bounds de l'image — le fog ne peut être ajouté qu'à l'intérieur de la map
+    const img = mapImageRef.current;
+    const imgLeft   = img ? imgXRef.current : -Infinity;
+    const imgRight  = img ? imgXRef.current + img.naturalWidth  * imgScaleRef.current : Infinity;
+    const imgTop    = img ? imgYRef.current : -Infinity;
+    const imgBottom = img ? imgYRef.current + img.naturalHeight * imgScaleRef.current : Infinity;
+    for (let cx = cx0; cx <= cx1; cx++) {
+      for (let cy = cy0; cy <= cy1; cy++) {
+        if (adding) {
+          // Vérifier que le centre de la cellule est dans les bounds de l'image avant d'ajouter
+          const centerX = cx * gs + gs / 2;
+          const centerY = cy * gs + gs / 2;
+          if (centerX >= imgLeft && centerX <= imgRight && centerY >= imgTop && centerY <= imgBottom)
+            next.add(`${cx},${cy}`);
+        } else {
+          next.delete(`${cx},${cy}`);
+        }
+      }
+    }
     fogCellsRef.current = next; setFogCells(next); drawFrame();
   };
   const getMapImgHit = (pos) => {
