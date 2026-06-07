@@ -29,44 +29,35 @@ export default function CombatTracker({ sessionId, isDM }) {
   const socket = useSocket();
   const { token, user } = useAuth();
   const [encounter, setEncounter] = useState(null);
-  // Ref sur l'encounter courant pour les handlers socket (évite les fermetures obsolètes)
   const encounterRef = useRef(null);
 
-  // Formulaire création combat (MJ)
   const [newName, setNewName] = useState('');
 
-  // Formulaire ajout entité (MJ)
   const [entityName, setEntityName] = useState('');
   const [entityInit, setEntityInit] = useState('');
   const [entityHP, setEntityHP] = useState('');
   const [entityType, setEntityType] = useState('enemy');
 
-  // Fix 1 — Rejoindre le combat (joueur)
   const [showJoin, setShowJoin] = useState(false);
   const [joinType, setJoinType] = useState('character');
   const [joinName, setJoinName] = useState('');
   const [joinInit, setJoinInit] = useState('');
   const [joinHp, setJoinHp] = useState('');
-  // Fix 3 — Champs supplémentaires pour le compagnon
   const [joinHpMax, setJoinHpMax] = useState('');
   const [joinAc, setJoinAc] = useState('');
   const [myCharacter, setMyCharacter] = useState(null);
 
-  // Fix 5 — Input PV par entité (entityId → valeur saisie)
+  // Fix 1 — valeur saisie par entité (entityId → chaîne signée ex: "10", "-5", "+10")
   const [hpDeltas, setHpDeltas] = useState({});
-  // Fix 5 — Flash PV visuel (entityId → { text, color })
+  // Flash PV visuel (entityId → { text, color })
   const [hpFlash, setHpFlash] = useState({});
 
-  // Sélecteur de statut (entityId ouvert ou null) + position viewport
   const [statusOpen, setStatusOpen] = useState(null);
   const [statusPickerPos, setStatusPickerPos] = useState({ left: 0, top: 0 });
 
-  // Garder la ref synchronisée avec l'état pour les handlers socket
   useEffect(() => { encounterRef.current = encounter; }, [encounter]);
-
   useEffect(() => { fetchEncounter(); }, [sessionId]);
 
-  // Charger le personnage du joueur pour le formulaire de jointure
   useEffect(() => {
     if (!sessionId) return;
     fetch(`${API}/characters/session/${sessionId}`, {
@@ -86,7 +77,7 @@ export default function CombatTracker({ sessionId, isDM }) {
     const onUpdated = (data) => setEncounter(normalize(data));
     const onTurnChanged = (data) => setEncounter(normalize(data));
 
-    // Fix 2 — Sync PV fiche → combat : mettre à jour l'entité liée au personnage modifié
+    // Sync PV fiche → combat
     const onCharUpdated = (character) => {
       const prev = encounterRef.current;
       if (!prev?.entities) return;
@@ -99,7 +90,6 @@ export default function CombatTracker({ sessionId, isDM }) {
       );
       const updated = { ...prev, entities };
       setEncounter(updated);
-      // Persister le combat mis à jour en base
       fetch(`${API}/combat/${updated.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -118,7 +108,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     };
   }, [socket]);
 
-  // Fermer le sélecteur de statut si on clique en dehors (position:fixed → pas dans le flow)
   useEffect(() => {
     if (!statusOpen) return;
     const handler = (e) => {
@@ -140,7 +129,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
-  // Un joueur peut éditer uniquement ses propres entités ; le MJ peut tout éditer
   const canEditEntity = (entity) =>
     isDM || entity.addedBy === user?.id || entity.userId === user?.id;
 
@@ -167,7 +155,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
-  // MJ : ajouter une entité au combat
   const addEntity = () => {
     if (!entityName.trim() || !encounter) return;
     const entities = [
@@ -190,7 +177,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     setEntityName(''); setEntityInit(''); setEntityHP('');
   };
 
-  // Fix 1 — Joueur rejoint le combat avec son personnage (pré-rempli) ou un compagnon
   const joinCombat = () => {
     if (!encounter) return;
     let newEntity;
@@ -209,7 +195,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         statuses: [],
       };
     } else {
-      // Fix 3 — Compagnon : saisie manuelle, pas de lien avec une fiche personnage
       if (!joinName.trim()) return;
       newEntity = {
         id: Date.now().toString(),
@@ -228,7 +213,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     const updated = { ...encounter, entities };
     setEncounter(updated);
     broadcastUpdate(updated);
-    // Fix 4 — Réinitialiser tout le formulaire après jointure
     setShowJoin(false);
     setJoinType('character');
     setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinHpMax(''); setJoinAc('');
@@ -245,9 +229,12 @@ export default function CombatTracker({ sessionId, isDM }) {
     broadcastUpdate(updated);
   };
 
-  // Fix 5 — Appliquer un delta de PV ; forceDelta optionnel pour les touches +/-
+  // Appliquer un delta de PV avec flash visuel
+  // forceDelta : valeur signée imposée (boutons + et -), sinon on lit hpDeltas[entityId]
   const applyHPDelta = (entityId, forceDelta) => {
-    const delta = forceDelta !== undefined ? forceDelta : parseInt(hpDeltas[entityId] || '0');
+    const delta = forceDelta !== undefined
+      ? forceDelta
+      : parseInt(hpDeltas[entityId] || '0');
     if (!delta || isNaN(delta) || !encounter) return;
     let updatedEntity = null;
     const entities = encounter.entities.map(e => {
@@ -260,14 +247,13 @@ export default function CombatTracker({ sessionId, isDM }) {
     const updated = { ...encounter, entities };
     setEncounter(updated);
     broadcastUpdate(updated);
-    // Fix 2 — Synchroniser hp_current vers la fiche personnage si l'entité y est liée
     if (updatedEntity.characterId && socket) {
       socket.emit('character-update', {
         sessionId,
         character: { id: updatedEntity.characterId, hp_current: updatedEntity.hp },
       });
     }
-    // Fix 5 — Flash visuel : vert pour soins, rouge pour dégâts
+    // Flash vert pour soins, rouge pour dégâts
     const flashText = delta > 0 ? `+${delta}` : `${delta}`;
     const flashColor = delta > 0 ? '#22c55e' : '#f87171';
     setHpFlash(prev => ({ ...prev, [entityId]: { text: flashText, color: flashColor } }));
@@ -275,27 +261,40 @@ export default function CombatTracker({ sessionId, isDM }) {
     setHpDeltas(prev => ({ ...prev, [entityId]: '' }));
   };
 
-  // Fix 5 — Gestion des touches sur l'input PV
-  // + : applique +|valeur| (soins)   - : applique -|valeur| (dégâts)   Entrée : applique telle quelle
+  // Fix 1 — Signe automatique sur l'input PV
+  // - : transforme la valeur courante en négative (dégâts)
+  // + : transforme la valeur courante en positive (soins)
+  // Entrée : applique la valeur telle quelle (signée)
   const handleHpKeyDown = (entityId, e) => {
-    const val = parseInt(hpDeltas[entityId] || '');
-    const hasValue = !isNaN(val) && val !== 0;
-    if (e.key === '+') {
+    if (e.key === '-') {
       e.preventDefault();
-      if (hasValue) applyHPDelta(entityId, Math.abs(val));
-    } else if (e.key === '-') {
-      if (hasValue) {
-        e.preventDefault();
-        applyHPDelta(entityId, -Math.abs(val));
-      }
-      // Sans valeur : laisser taper "-" pour saisir "-10" puis Entrée
+      setHpDeltas(prev => {
+        const abs = Math.abs(parseInt(prev[entityId] || '') || 0);
+        return { ...prev, [entityId]: abs > 0 ? String(-abs) : prev[entityId] ?? '' };
+      });
+    } else if (e.key === '+') {
+      e.preventDefault();
+      setHpDeltas(prev => {
+        const abs = Math.abs(parseInt(prev[entityId] || '') || 0);
+        return { ...prev, [entityId]: abs > 0 ? String(abs) : prev[entityId] ?? '' };
+      });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       applyHPDelta(entityId);
     }
   };
 
-  // Ouvrir le sélecteur de statut en position viewport (hors du flow pour éviter le clipping)
+  // Fix 2 — Helpers pour les boutons + et - inline
+  // Lit la valeur absolue de l'input et l'applique avec le signe voulu
+  const applyPositive = (entityId) => {
+    const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
+    if (abs > 0) applyHPDelta(entityId, abs);
+  };
+  const applyNegative = (entityId) => {
+    const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
+    if (abs > 0) applyHPDelta(entityId, -abs);
+  };
+
   const openStatusPicker = (entityId, e) => {
     if (statusOpen === entityId) { setStatusOpen(null); return; }
     const rect = e.currentTarget.getBoundingClientRect();
@@ -306,7 +305,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     setStatusOpen(entityId);
   };
 
-  // Ajouter / retirer un statut (tout le monde peut le faire)
   const toggleStatus = (entityId, status) => {
     if (!encounter) return;
     const entities = encounter.entities.map(e => {
@@ -345,7 +343,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     broadcastUpdate(updated);
   };
 
-  // Joueur passe son propre tour
   const skipMyTurn = () => {
     if (!encounter || !encounter.entities.length) return;
     const next = (encounter.current_turn + 1) % encounter.entities.length;
@@ -368,7 +365,6 @@ export default function CombatTracker({ sessionId, isDM }) {
   };
 
   const activeEntity = encounter?.entities[encounter?.current_turn];
-  // Vrai si c'est le tour d'une entité appartenant au joueur connecté
   const isMyTurn = !isDM && !!activeEntity && (
     activeEntity.addedBy === user?.id || activeEntity.userId === user?.id
   );
@@ -414,7 +410,6 @@ export default function CombatTracker({ sessionId, isDM }) {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '4px', flexShrink: 0, flexWrap: 'wrap' }}>
-            {/* Bouton visible uniquement si c'est le tour d'une entité du joueur */}
             {isMyTurn && (
               <button className="btn btn-primary btn-sm" onClick={skipMyTurn} title="Passer mon tour">
                 Passer ▶
@@ -458,6 +453,7 @@ export default function CombatTracker({ sessionId, isDM }) {
             const hpClass = hpPct > 60 ? 'hp-high' : hpPct > 30 ? 'hp-mid' : 'hp-low';
             const statuses = entity.statuses || [];
             const flash = hpFlash[entity.id];
+            const canEdit = canEditEntity(entity);
 
             return (
               <div
@@ -476,32 +472,82 @@ export default function CombatTracker({ sessionId, isDM }) {
                   {entity.type === 'enemy' ? '💀' : '🛡️'}
                 </span>
 
-                {/* Nom, barre HP, CA et badges statuts */}
+                {/* Nom + barre HP + CA + badges statuts */}
                 <div style={{ flex: 1, minWidth: '80px' }}>
                   <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{entity.name}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-                    <div className="hp-bar-container" style={{ width: '80px', height: '5px' }}>
+
+                  {/* Fix 2 — Ligne PV : barre + texte + CA + input inline */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px', flexWrap: 'wrap' }}>
+                    <div className="hp-bar-container" style={{ width: '60px', height: '5px', flexShrink: 0 }}>
                       <div
                         className={`hp-bar ${hpClass}`}
                         style={{ width: `${Math.min(100, Math.max(0, hpPct))}%` }}
                       />
                     </div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                       {entity.hp}/{hpMax} PV
-                      {/* Fix 5 — Flash vert (soins) ou rouge (dégâts) après application */}
+                      {/* Flash vert (soins) ou rouge (dégâts) après application */}
                       {flash && (
-                        <span style={{ color: flash.color, marginLeft: '5px', fontWeight: 700 }}>
+                        <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
                           {flash.text}
                         </span>
                       )}
                     </span>
-                    {/* CA affichée si disponible */}
                     {entity.ac != null && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         🛡 {entity.ac}
                       </span>
                     )}
+
+                    {/* Fix 2 — Input PV inline, visible en permanence si le joueur peut éditer */}
+                    {canEdit && (
+                      <>
+                        {/* Fix 1 — type text pour intercepter + et - avant le navigateur */}
+                        <input
+                          type="text"
+                          value={hpDeltas[entity.id] || ''}
+                          onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
+                          onKeyDown={e => handleHpKeyDown(entity.id, e)}
+                          placeholder="PV"
+                          title="Tapez un nombre puis + (soins) ou − (dégâts) ou Entrée"
+                          style={{
+                            width: '42px', textAlign: 'center',
+                            fontSize: '0.72rem', padding: '2px 3px',
+                            flexShrink: 0,
+                          }}
+                        />
+                        {/* Bouton + : applique la valeur absolue en positif (soins) */}
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => applyPositive(entity.id)}
+                          title="Soins (+)"
+                          style={{
+                            padding: '1px 6px', fontSize: '0.78rem', fontWeight: 700,
+                            color: '#22c55e', background: 'rgba(34,197,94,0.12)',
+                            border: '1px solid rgba(34,197,94,0.35)', borderRadius: '4px',
+                            cursor: 'pointer', flexShrink: 0,
+                          }}
+                        >
+                          +
+                        </button>
+                        {/* Bouton − : applique la valeur absolue en négatif (dégâts) */}
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => applyNegative(entity.id)}
+                          title="Dégâts (−)"
+                          style={{
+                            padding: '1px 6px', fontSize: '0.78rem', fontWeight: 700,
+                            color: '#f87171', background: 'rgba(248,113,113,0.12)',
+                            border: '1px solid rgba(248,113,113,0.35)', borderRadius: '4px',
+                            cursor: 'pointer', flexShrink: 0,
+                          }}
+                        >
+                          −
+                        </button>
+                      </>
+                    )}
                   </div>
+
                   {/* Badges statuts actifs — cliquer pour retirer */}
                   {statuses.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
@@ -526,8 +572,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                   )}
                 </div>
 
-                {/* Bouton sélecteur de statut (tout le monde)
-                    Picker rendu en position:fixed (viewport) pour ne pas être clippé */}
+                {/* Bouton sélecteur de statut (position:fixed pour ne pas être clippé) */}
                 <button
                   data-status-picker
                   className="btn btn-secondary btn-sm"
@@ -538,34 +583,16 @@ export default function CombatTracker({ sessionId, isDM }) {
                   ✦
                 </button>
 
-                {/* Fix 5 — Input PV : type text pour capturer + / - / Entrée avant le navigateur */}
-                {canEditEntity(entity) && (
-                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      value={hpDeltas[entity.id] || ''}
-                      onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
-                      onKeyDown={e => handleHpKeyDown(entity.id, e)}
-                      placeholder="±PV"
-                      style={{ width: '52px', textAlign: 'center', fontSize: '0.78rem', padding: '3px 4px' }}
-                    />
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => applyHPDelta(entity.id)}
-                      title="Appliquer (ou : + soins · - dégâts · Entrée valeur signée)"
-                      style={{ padding: '4px 7px' }}
-                    >
-                      ✓
-                    </button>
-                    <button
-                      className="btn-icon"
-                      onClick={() => removeEntity(entity.id)}
-                      title="Retirer du combat"
-                      style={{ fontSize: '0.8rem' }}
-                    >
-                      ✕
-                    </button>
-                  </div>
+                {/* Bouton retirer du combat — visible si le joueur peut éditer cette entité */}
+                {canEdit && (
+                  <button
+                    className="btn-icon"
+                    onClick={() => removeEntity(entity.id)}
+                    title="Retirer du combat"
+                    style={{ fontSize: '0.8rem', flexShrink: 0 }}
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
             );
@@ -654,7 +681,7 @@ export default function CombatTracker({ sessionId, isDM }) {
         </div>
       )}
 
-      {/* Fix 1 & 3 — Rejoindre le combat (joueurs uniquement) */}
+      {/* Rejoindre le combat — joueurs uniquement */}
       {!isDM && (
         <div className="card">
           {!showJoin ? (
@@ -670,7 +697,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                 ⚔️ Rejoindre le combat
               </h4>
 
-              {/* Choix : mon personnage (pré-rempli) ou compagnon (saisie manuelle) */}
               <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-sm)' }}>
                 {myCharacter && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
@@ -684,7 +710,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                 </label>
               </div>
 
-              {/* Fix 1 — Résumé fiche pré-remplie (lecture seule) */}
               {joinType === 'character' && myCharacter && (
                 <div style={{
                   fontSize: '0.78rem', color: 'var(--text-muted)',
@@ -695,7 +720,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                 </div>
               )}
 
-              {/* Fix 3 — Champs compagnon : nom, PV actuel, PV max, CA */}
               {joinType === 'companion' && (
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-sm)' }}>
                   <input
@@ -721,7 +745,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                 </div>
               )}
 
-              {/* Initiative — seul champ à saisir pour le personnage */}
               <div className="form-group" style={{ marginBottom: 'var(--space-sm)' }}>
                 <label>Initiative</label>
                 <input
@@ -734,7 +757,6 @@ export default function CombatTracker({ sessionId, isDM }) {
                 <button className="btn btn-primary" style={{ flex: 1 }} onClick={joinCombat}>
                   Rejoindre
                 </button>
-                {/* Fix 4 — Annuler : réinitialiser complètement le formulaire */}
                 <button
                   className="btn btn-secondary"
                   onClick={() => {
