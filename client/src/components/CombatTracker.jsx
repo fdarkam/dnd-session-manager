@@ -33,11 +33,23 @@ export default function CombatTracker({ sessionId, isDM }) {
 
   const [newName, setNewName] = useState('');
 
+  // Formulaire entité manuelle (section 2 du panneau MJ)
   const [entityName, setEntityName] = useState('');
   const [entityInit, setEntityInit] = useState('');
   const [entityHP, setEntityHP] = useState('');
   const [entityType, setEntityType] = useState('enemy');
 
+  // ── Panneau ajout MJ ──────────────────────────────────────────────────────────
+  // showAddPanel : affiche le panneau à deux sections
+  // sessionCharacters : toutes les fiches de la session, pour la section 1
+  // selectedCharacter : fiche sélectionnée dans la liste (ouvre le mini-formulaire)
+  // dmAddInit : initiative saisie dans le mini-formulaire depuis une fiche
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [sessionCharacters, setSessionCharacters] = useState([]);
+  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  const [dmAddInit, setDmAddInit] = useState('');
+
+  // Rejoindre le combat — joueurs
   const [showJoin, setShowJoin] = useState(false);
   const [joinType, setJoinType] = useState('character');
   const [joinName, setJoinName] = useState('');
@@ -45,6 +57,7 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [joinHp, setJoinHp] = useState('');
   const [joinHpMax, setJoinHpMax] = useState('');
   const [joinAc, setJoinAc] = useState('');
+  // myCharacter : fiche du joueur connecté (utilisée dans le flow "Rejoindre")
   const [myCharacter, setMyCharacter] = useState(null);
 
   const [hpDeltas, setHpDeltas] = useState({});
@@ -56,13 +69,21 @@ export default function CombatTracker({ sessionId, isDM }) {
   useEffect(() => { encounterRef.current = encounter; }, [encounter]);
   useEffect(() => { fetchEncounter(); }, [sessionId]);
 
+  // Charge toutes les fiches de la session.
+  // Le MJ a besoin de la liste complète (section 1 du panneau ajout).
+  // Le joueur garde myCharacter (premier résultat) pour rejoindre avec sa propre fiche.
   useEffect(() => {
     if (!sessionId) return;
     fetch(`${API}/characters/session/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => (r.ok ? r.json() : []))
-      .then(data => { if (Array.isArray(data) && data.length > 0) setMyCharacter(data[0]); });
+      .then(data => {
+        if (Array.isArray(data)) {
+          setSessionCharacters(data);
+          if (data.length > 0) setMyCharacter(data[0]);
+        }
+      });
   }, [sessionId, token]);
 
   useEffect(() => {
@@ -150,6 +171,7 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
+  // Ajout d'une entité manuelle par le MJ (section 2 du panneau)
   const addEntity = () => {
     if (!entityName.trim() || !encounter) return;
     const entities = [
@@ -169,6 +191,39 @@ export default function CombatTracker({ sessionId, isDM }) {
     const updated = { ...encounter, entities };
     setEncounter(updated);
     broadcastUpdate(updated);
+    setEntityName(''); setEntityInit(''); setEntityHP('');
+  };
+
+  // Ajoute une entité depuis une fiche joueur : nom/PV/CA pré-remplis,
+  // characterId stocké pour rester synchronisé avec la fiche en temps réel
+  const addFromSheet = () => {
+    if (!selectedCharacter || !encounter) return;
+    const newEntity = {
+      id: Date.now().toString(),
+      name: selectedCharacter.name || 'Personnage',
+      initiative: parseInt(dmAddInit) || 0,
+      hp: selectedCharacter.hp_current ?? selectedCharacter.hp_max ?? 10,
+      hp_max: selectedCharacter.hp_max ?? 10,
+      ac: selectedCharacter.ac ?? 10,
+      type: 'player',
+      characterId: selectedCharacter.id,
+      addedBy: user?.id,
+      statuses: [],
+    };
+    const entities = [...(encounter.entities || []), newEntity];
+    entities.sort((a, b) => b.initiative - a.initiative);
+    const updated = { ...encounter, entities };
+    setEncounter(updated);
+    broadcastUpdate(updated);
+    // Fermer le panneau et réinitialiser la sélection
+    closeDmAddPanel();
+  };
+
+  // Ferme le panneau MJ et réinitialise tous ses états
+  const closeDmAddPanel = () => {
+    setShowAddPanel(false);
+    setSelectedCharacter(null);
+    setDmAddInit('');
     setEntityName(''); setEntityInit(''); setEntityHP('');
   };
 
@@ -671,38 +726,155 @@ export default function CombatTracker({ sessionId, isDM }) {
         </div>
       )}
 
-      {/* Formulaire ajout entité — MJ uniquement */}
+      {/* ── Panneau ajout MJ — affiché uniquement pour le MJ ──────────────────── */}
       {isDM && (
         <div className="card" style={{ marginBottom: 'var(--space-md)' }}>
-          <h4 style={{
-            fontFamily: 'var(--font-heading)', color: 'var(--text-secondary)',
-            fontSize: '0.9rem', marginBottom: 'var(--space-sm)',
-          }}>
-            + Ajouter une entité
-          </h4>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ flex: 1, minWidth: '100px', marginBottom: 0 }}>
-              <label>Nom</label>
-              <input type="text" value={entityName} onChange={e => setEntityName(e.target.value)} placeholder="Gobelin…" />
-            </div>
-            <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
-              <label>Init.</label>
-              <input type="number" value={entityInit} onChange={e => setEntityInit(e.target.value)} placeholder="15" />
-            </div>
-            <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
-              <label>PV</label>
-              <input type="number" value={entityHP} onChange={e => setEntityHP(e.target.value)} placeholder="20" />
-            </div>
-            <div className="form-group" style={{ width: '110px', marginBottom: 0 }}>
-              <label>Type</label>
-              <select value={entityType} onChange={e => setEntityType(e.target.value)}>
-                <option value="enemy">💀 Ennemi</option>
-                <option value="player">🛡️ Joueur</option>
-                <option value="npc">🧑 PNJ</option>
-              </select>
-            </div>
-            <button className="btn btn-primary" onClick={addEntity} style={{ marginBottom: 0 }}>Ajouter</button>
-          </div>
+          {!showAddPanel ? (
+            // Bouton compact affiché par défaut : ouvre le panneau à deux sections
+            <button className="btn btn-primary w-full" onClick={() => setShowAddPanel(true)}>
+              + Ajouter un personnage
+            </button>
+          ) : (
+            <>
+              <h4 style={{
+                fontFamily: 'var(--font-heading)', color: 'var(--text-secondary)',
+                fontSize: '0.9rem', marginBottom: 'var(--space-md)',
+              }}>
+                + Ajouter une entité
+              </h4>
+
+              {/* ── Section 1 : Depuis une fiche joueur ──────────────────────── */}
+              <div style={{ marginBottom: 'var(--space-md)' }}>
+                <h5 style={{
+                  fontSize: '0.78rem', color: 'var(--text-muted)',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  marginBottom: 'var(--space-sm)', fontWeight: 600,
+                }}>
+                  🛡️ Depuis une fiche joueur
+                </h5>
+
+                {sessionCharacters.length === 0 ? (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Aucune fiche disponible dans cette session.
+                  </p>
+                ) : selectedCharacter ? (
+                  // Mini-formulaire : seule l'initiative est saisie, le reste vient de la fiche
+                  <div style={{
+                    background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
+                    padding: '10px', marginBottom: 'var(--space-sm)',
+                  }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                      {selectedCharacter.name}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                      {selectedCharacter.hp_current ?? selectedCharacter.hp_max ?? '?'}/{selectedCharacter.hp_max ?? '?'} PV
+                      {' • '}CA {selectedCharacter.ac ?? '?'}
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 'var(--space-sm)' }}>
+                      <label style={{ fontSize: '0.78rem' }}>Initiative</label>
+                      <input
+                        type="number"
+                        value={dmAddInit}
+                        onChange={e => setDmAddInit(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addFromSheet()}
+                        placeholder="Jet d'initiative"
+                        autoFocus
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={addFromSheet}>
+                        Confirmer
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => { setSelectedCharacter(null); setDmAddInit(''); }}
+                      >
+                        ← Retour
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // Liste des fiches : grisée et non cliquable si le personnage est déjà dans le combat
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: 'var(--space-sm)' }}>
+                    {sessionCharacters.map(char => {
+                      const alreadyIn = encounter?.entities?.some(e => e.characterId === char.id);
+                      return (
+                        <button
+                          key={char.id}
+                          onClick={alreadyIn ? undefined : () => setSelectedCharacter(char)}
+                          disabled={alreadyIn}
+                          title={alreadyIn ? 'Déjà dans le combat' : `Ajouter ${char.name}`}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border-color)',
+                            background: alreadyIn ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                            color: alreadyIn ? 'var(--text-muted)' : 'var(--text-primary)',
+                            opacity: alreadyIn ? 0.5 : 1,
+                            cursor: alreadyIn ? 'not-allowed' : 'pointer',
+                            fontSize: '0.82rem', textAlign: 'left', width: '100%',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{char.name}</span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {char.hp_current ?? char.hp_max ?? '?'}/{char.hp_max ?? '?'} PV
+                            {' • '}CA {char.ac ?? '?'}
+                            {alreadyIn && ' · Déjà présent'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Séparateur entre les deux sections */}
+              <div style={{ borderTop: '1px solid var(--border-color)', margin: '0 0 var(--space-md)' }} />
+
+              {/* ── Section 2 : Entité manuelle (ennemi / PNJ) ───────────────── */}
+              <div style={{ marginBottom: 'var(--space-sm)' }}>
+                <h5 style={{
+                  fontSize: '0.78rem', color: 'var(--text-muted)',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  marginBottom: 'var(--space-sm)', fontWeight: 600,
+                }}>
+                  💀 Entité manuelle (ennemi / PNJ)
+                </h5>
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div className="form-group" style={{ flex: 1, minWidth: '100px', marginBottom: 0 }}>
+                    <label>Nom</label>
+                    <input type="text" value={entityName} onChange={e => setEntityName(e.target.value)} placeholder="Gobelin…" />
+                  </div>
+                  <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
+                    <label>Init.</label>
+                    <input type="number" value={entityInit} onChange={e => setEntityInit(e.target.value)} placeholder="15" />
+                  </div>
+                  <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
+                    <label>PV</label>
+                    <input type="number" value={entityHP} onChange={e => setEntityHP(e.target.value)} placeholder="20" />
+                  </div>
+                  <div className="form-group" style={{ width: '110px', marginBottom: 0 }}>
+                    <label>Type</label>
+                    <select value={entityType} onChange={e => setEntityType(e.target.value)}>
+                      <option value="enemy">💀 Ennemi</option>
+                      <option value="player">🛡️ Joueur</option>
+                      <option value="npc">🧑 PNJ</option>
+                    </select>
+                  </div>
+                  <button className="btn btn-primary" onClick={addEntity} style={{ marginBottom: 0 }}>Ajouter</button>
+                </div>
+              </div>
+
+              {/* Bouton Annuler — ferme le panneau et réinitialise tous les champs */}
+              <button
+                className="btn btn-secondary w-full"
+                style={{ marginTop: 'var(--space-sm)' }}
+                onClick={closeDmAddPanel}
+              >
+                Annuler
+              </button>
+            </>
+          )}
         </div>
       )}
 
