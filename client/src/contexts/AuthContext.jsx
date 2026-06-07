@@ -81,8 +81,16 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  // Mise à jour locale du pseudo sans appel API — appelée par SessionPage lors d'un username-updated socket.
+  // Ne concerne que l'utilisateur connecté (userId === user.id).
+  const patchUsername = (userId, newUsername) => {
+    if (user?.id === userId) {
+      setUser(prev => prev ? { ...prev, username: newUsername } : prev);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, updateProfile, updatePassword }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout, updateProfile, updatePassword, patchUsername }}>
       {children}
     </AuthContext.Provider>
   );

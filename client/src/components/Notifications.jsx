@@ -84,12 +84,27 @@ export default function Notifications() {
       }, 4000);
     };
 
+    // Stocker userId + action pour pouvoir mettre à jour le message si le pseudo change pendant l'affichage
     const onUserJoined = (data) => {
-      onNotification({ type: 'info', message: `${data.username} a rejoint la session` });
+      const id = notifId();
+      setToasts(prev => [...prev, { id, type: 'info', userId: data.id, action: 'joined', message: `${data.username} a rejoint la session` }]);
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
     };
 
     const onUserLeft = (data) => {
-      onNotification({ type: 'info', message: `${data.username} a quitté la session` });
+      const id = notifId();
+      setToasts(prev => [...prev, { id, type: 'info', userId: data.id, action: 'left', message: `${data.username} a quitté la session` }]);
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    };
+
+    // Mise à jour des toasts user-joined/user-left encore visibles si le pseudo change
+    const onUsernameUpdated = ({ userId, newUsername }) => {
+      setToasts(prev => prev.map(t => {
+        if (t.userId !== userId) return t;
+        if (t.action === 'joined') return { ...t, message: `${newUsername} a rejoint la session` };
+        if (t.action === 'left') return { ...t, message: `${newUsername} a quitté la session` };
+        return t;
+      }));
     };
 
     const onDiceResult = (data) => {
@@ -117,6 +132,7 @@ export default function Notifications() {
     socket.on('notification', onNotification);
     socket.on('user-joined', onUserJoined);
     socket.on('user-left', onUserLeft);
+    socket.on('username-updated', onUsernameUpdated);
     socket.on('dice-result', onDiceResult);
     socket.on('dice-result', onDiceResultSound);
 
@@ -124,6 +140,7 @@ export default function Notifications() {
       socket.off('notification', onNotification);
       socket.off('user-joined', onUserJoined);
       socket.off('user-left', onUserLeft);
+      socket.off('username-updated', onUsernameUpdated);
       socket.off('dice-result', onDiceResult);
       socket.off('dice-result', onDiceResultSound);
     };

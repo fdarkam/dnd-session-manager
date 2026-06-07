@@ -5,6 +5,10 @@ import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
+// Référence à l'instance Socket.IO — injectée depuis server/index.js après création du serveur
+let io = null;
+export function setWikiIo(ioInstance) { io = ioInstance; }
+
 function getRole(sessionId, userId) {
   const m = db.prepare('SELECT role FROM session_members WHERE session_id = ? AND user_id = ?').get(sessionId, userId);
   return m?.role || null;
@@ -29,6 +33,8 @@ router.post('/', authMiddleware, (req, res) => {
     db.prepare('INSERT INTO wiki_pages (id, session_id, title, category, content, created_by) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, session_id, title, category || 'Général', content || '', req.user.id);
     res.json(db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(id));
+    // Notifier tous les membres de la session de la nouvelle page
+    if (io) io.to(session_id).emit('wiki-updated', { action: 'created', pageId: id });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -45,6 +51,8 @@ router.put('/:id', authMiddleware, (req, res) => {
     vals.push(req.params.id);
     db.prepare(`UPDATE wiki_pages SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
     res.json(db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(req.params.id));
+    // Notifier tous les membres de la session de la modification
+    if (io) io.to(page.session_id).emit('wiki-updated', { action: 'updated', pageId: req.params.id });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -55,6 +63,8 @@ router.delete('/:id', authMiddleware, (req, res) => {
     if (getRole(page.session_id, req.user.id) !== 'dm') return res.status(403).json({ error: 'Accès refusé' });
     db.prepare('DELETE FROM wiki_pages WHERE id = ?').run(req.params.id);
     res.json({ success: true });
+    // Notifier tous les membres de la session de la suppression
+    if (io) io.to(page.session_id).emit('wiki-updated', { action: 'deleted', pageId: req.params.id });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

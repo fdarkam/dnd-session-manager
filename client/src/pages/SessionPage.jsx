@@ -11,7 +11,7 @@ import WikiPanel from '../components/WikiPanel';
 import ProfileModal from '../components/ProfileModal';
 
 export default function SessionPage({ sessionId, onBack }) {
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, patchUsername } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
   const [showChat, setShowChat] = useState(true);
   const socket = useSocket();
@@ -68,14 +68,28 @@ export default function SessionPage({ sessionId, onBack }) {
       setOnlineUsers(prev => { const next = new Set(prev); next.delete(id); return next; });
     };
 
+    // Pseudo modifié : mettre à jour members[] et le state AuthContext si c'est l'utilisateur courant
+    const onUsernameUpdated = ({ userId, newUsername }) => {
+      setSession(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          members: (prev.members || []).map(m => m.id === userId ? { ...m, username: newUsername } : m),
+        };
+      });
+      patchUsername(userId, newUsername);
+    };
+
     socket.on('online-users', onOnlineUsers);
     socket.on('user-joined', onUserJoined);
     socket.on('user-left', onUserLeft);
+    socket.on('username-updated', onUsernameUpdated);
 
     return () => {
       socket.off('online-users', onOnlineUsers);
       socket.off('user-joined', onUserJoined);
       socket.off('user-left', onUserLeft);
+      socket.off('username-updated', onUsernameUpdated);
     };
   }, [socket, sessionId]);
 

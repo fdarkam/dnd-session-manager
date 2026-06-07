@@ -1,14 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 
 export default function ActionLog({ sessionId }) {
   const { token } = useAuth();
+  const socket = useSocket();
   const [logs, setLogs] = useState([]);
 
   useEffect(() => {
     // Chargement unique au montage — pas de polling ni de bouton Rafraîchir
     fetchLogs();
   }, [sessionId]);
+
+  // Refetch des logs quand un pseudo change — les descriptions en DB sont mises à jour côté serveur
+  useEffect(() => {
+    if (!socket) return;
+    const handler = () => fetchLogs();
+    socket.on('username-updated', handler);
+    return () => socket.off('username-updated', handler);
+  }, [socket, sessionId]);
 
   const fetchLogs = async () => {
     const res = await fetch(`${API}/logs/${sessionId}`, {

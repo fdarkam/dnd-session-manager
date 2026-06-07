@@ -635,6 +635,15 @@ export default function MapCanvas({ sessionId, isDM }) {
       otherCursorsRef.current = { ...otherCursorsRef.current, [userId]: { userId, username, x, y } };
       startLerpAnimation();
     };
+    // Mise à jour du label du curseur si l'utilisateur est présent sur la carte
+    const onUsernameUpdated = ({ userId, newUsername }) => {
+      if (otherCursorsRef.current[userId]) {
+        otherCursorsRef.current = {
+          ...otherCursorsRef.current,
+          [userId]: { ...otherCursorsRef.current[userId], username: newUsername },
+        };
+      }
+    };
     const onPing = ({ x, y }) => {
       pingAnimRef.current = [...pingAnimRef.current, { x, y, ts: Date.now() }];
       drawFrame();
@@ -662,6 +671,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-deleted', onMapDeleted);
     socket.on('map-renamed', onMapRenamed);
     socket.on('cursor-update', onCursorUpdate);
+    socket.on('username-updated', onUsernameUpdated);
     socket.on('map-ping', onPing);
     socket.on('map-grid-size', onGridSize);
     socket.on('map-image-cleared', onMapImageCleared);
@@ -681,6 +691,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-deleted', onMapDeleted);
       socket.off('map-renamed', onMapRenamed);
       socket.off('cursor-update', onCursorUpdate);
+      socket.off('username-updated', onUsernameUpdated);
       socket.off('map-ping', onPing);
       socket.off('map-grid-size', onGridSize);
       socket.off('map-image-cleared', onMapImageCleared);

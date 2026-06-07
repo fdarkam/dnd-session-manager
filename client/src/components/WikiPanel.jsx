@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, API } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 
 const CATEGORIES = [
   { id: 'Général', icon: '📄' },
@@ -11,6 +12,7 @@ const CATEGORIES = [
 
 export default function WikiPanel({ sessionId, isDM }) {
   const { token } = useAuth();
+  const socket = useSocket();
   const [pages, setPages] = useState([]);
   const [selectedCat, setSelectedCat] = useState('Général');
   const [selectedPage, setSelectedPage] = useState(null);
@@ -20,6 +22,21 @@ export default function WikiPanel({ sessionId, isDM }) {
   const [newCat, setNewCat] = useState('Général');
 
   useEffect(() => { fetchPages(); }, [sessionId]);
+
+  // Mise à jour temps réel : refetch la liste des pages quand le MJ crée, modifie ou supprime une page
+  useEffect(() => {
+    if (!socket) return;
+    const handler = ({ action, pageId }) => {
+      fetchPages();
+      // Si la page actuellement affichée est supprimée, la désélectionner
+      if (action === 'deleted') {
+        setSelectedPage(prev => (prev?.id === pageId ? null : prev));
+        setEditing(false);
+      }
+    };
+    socket.on('wiki-updated', handler);
+    return () => socket.off('wiki-updated', handler);
+  }, [socket]);
 
   const fetchPages = async () => {
     const res = await fetch(`${API}/wiki/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });

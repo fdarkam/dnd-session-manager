@@ -34,6 +34,18 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
     return () => socket.off('chat-message', handler);
   }, [socket]);
 
+  // Rechargement de l'historique quand un pseudo change — les messages en DB ont le nouveau nom
+  useEffect(() => {
+    if (!socket) return;
+    const handler = () => {
+      fetch(`${API}/chat/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setMessages(data); });
+    };
+    socket.on('username-updated', handler);
+    return () => socket.off('username-updated', handler);
+  }, [socket, sessionId, token]);
+
   // Rechargement de l'historique après reconnexion (messages manqués pendant la coupure)
   useEffect(() => {
     if (!socket) return;

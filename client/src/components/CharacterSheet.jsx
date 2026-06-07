@@ -58,6 +58,21 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     return () => socket.off('character-updated', handler);
   }, [socket]);
 
+  // Mise à jour du nom du joueur assigné quand il change son pseudo
+  useEffect(() => {
+    if (!socket) return;
+    const handler = ({ userId, newUsername }) => {
+      setCharacters(prev => prev.map(c =>
+        c.assigned_user_id === userId ? { ...c, assigned_player_name: newUsername } : c
+      ));
+      setSelected(prev =>
+        prev?.assigned_user_id === userId ? { ...prev, assigned_player_name: newUsername } : prev
+      );
+    };
+    socket.on('username-updated', handler);
+    return () => socket.off('username-updated', handler);
+  }, [socket]);
+
   const fetchCharacters = async () => {
     const res = await fetch(`${API}/characters/session/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` }

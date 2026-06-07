@@ -7,6 +7,10 @@ import { JWT_SECRET, authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
+// Référence à l'instance Socket.IO — injectée depuis server/index.js
+let io = null;
+export function setAuthIo(ioInstance) { io = ioInstance; }
+
 router.post('/register', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -82,9 +86,14 @@ router.put('/profile', authMiddleware, async (req, res) => {
     const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(trimmed, req.user.id);
     if (existing) return res.status(400).json({ error: 'Ce pseudo est déjà pris' });
     db.prepare('UPDATE users SET username = ? WHERE id = ?').run(trimmed, req.user.id);
+    // Propager le nouveau pseudo dans l'historique chat et les logs d'action
+    db.prepare('UPDATE chat_messages SET username = ? WHERE user_id = ?').run(trimmed, req.user.id);
+    db.prepare('UPDATE action_logs SET username = ? WHERE user_id = ?').run(trimmed, req.user.id);
     // Re-issue token with new username so client stays valid
     const newToken = jwt.sign({ id: req.user.id, username: trimmed }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token: newToken, user: { id: req.user.id, username: trimmed } });
+    // Notifier tous les clients connectés du changement de pseudo
+    if (io) io.emit('username-updated', { userId: req.user.id, newUsername: trimmed });
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
