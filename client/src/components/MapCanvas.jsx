@@ -315,11 +315,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   const mouseWorldPosRef = useRef({ x: 0, y: 0 }); // position monde courante de la souris
   const undoStackRef = useRef([]);       // pile d'annulation (max 20 entrées)
   const redoStackRef = useRef([]);       // pile de rétablissement
-  // ── Fog automatique ──
-  const exploredCellsRef  = useRef(new Set()); // cellules déjà visitées par les joueurs (mémorisées)
-  const visibleCellsRef   = useRef(new Set()); // cellules actuellement dans le champ de vision
-  const autoFogEnabledRef = useRef(true);      // fog automatique activé (synché avec state)
-  const lastFogUpdateRef  = useRef(0);         // throttle du recalcul fog auto (100ms)
+  // ── Fog unifié ──
+  const exploredCellsRef = useRef(new Set()); // cellules traversées par les joueurs (30% d'opacité)
+  const lastFogUpdateRef = useRef(0);         // throttle du recalcul fog pendant drag (50ms)
   // ── React state (drives re-render / UI only) ──
   const [maps, setMaps] = useState([]);
   const [activeMap, setActiveMap] = useState(null);
@@ -366,9 +364,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const mapImgElemRef = useRef(null); // <img> DOM de la map background
   const [newTokenImage, setNewTokenImage] = useState(null);
   const [newTokenHidden, setNewTokenHidden] = useState(false);
-  const [autoFogEnabled, setAutoFogEnabled] = useState(true);  // fog automatique actif par défaut
-  const [visibleCells, setVisibleCells] = useState(new Set()); // cellules visibles (pour token overlay)
-  const [tokenEditPos, setTokenEditPos] = useState(null);      // position initiale du panneau d'édition de token
+  const [tokenEditPos, setTokenEditPos] = useState(null); // position initiale du panneau d'édition de token
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -388,7 +384,6 @@ export default function MapCanvas({ sessionId, isDM }) {
   useEffect(() => { activeMapRef.current = activeMap; }, [activeMap]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { selectedTokenRef.current = selectedToken; }, [selectedToken]);
-  useEffect(() => { autoFogEnabledRef.current = autoFogEnabled; }, [autoFogEnabled]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // drawFrame — reads ONLY refs, never state → safe to call synchronously
@@ -479,24 +474,21 @@ export default function MapCanvas({ sessionId, isDM }) {
     // Anneaux et handles de sélection → rendu en CSS (box-shadow) dans le token overlay HTML
     // pour éviter qu'ils soient cachés sous les divs HTML à z-index supérieur
 
-    // ─── Couches de fog (3 niveaux superposés) ──────────────────────────────
-    // Couche 1 (prioritaire) : fog MJ manuel
-    // Couche 2 : fog automatique — zones inconnue 80%, mémorisée 30%, visible 0%
-    // Couche 3 : cercles de vision en pointillés (debug MJ uniquement)
-    const autoFog = autoFogEnabledRef.current;
-    const visible = visibleCellsRef.current;
+    // ─── Fog unifié : fog MJ peint (80%) + zones explorées (30%) ────────────
+    // Un seul fog : fogCellsRef (peint par le MJ). Les joueurs le révèlent en se déplaçant.
+    // Les zones traversées restent dans exploredCellsRef à 30% pour indiquer qu'elles ont été visitées.
     const explored = exploredCellsRef.current;
 
     if (dm) {
-      // MJ : fog manuel semi-transparent uniquement (le MJ voit toujours tout)
+      // MJ : fog semi-transparent (voit toujours tout) + cercles de vision debug
       if (fc.size > 0) {
         const hex = fogColorRef.current.replace('#', '');
         const fr = parseInt(hex.slice(0, 2), 16), fg = parseInt(hex.slice(2, 4), 16), fb = parseInt(hex.slice(4, 6), 16);
         ctx.fillStyle = `rgba(${fr},${fg},${fb},${Math.min(fogOpacityRef.current, 0.65)})`;
         fc.forEach(key => { const [cx, cy] = key.split(',').map(Number); ctx.fillRect(cx * gs, cy * gs, gs, gs); });
       }
-      // Cercles de vision en pointillés (debug MJ) — visibles uniquement si fog auto activé
-      if (autoFog && gs > 0) {
+      // Cercles de vision des tokens joueurs — aide le MJ à visualiser les zones révélées
+      if (gs > 0) {
         tokensRef.current.forEach(tok => {
           if (tok.hidden || tok.type === 'enemy') return;
           const vr = (tok.nightVision ? VISION_ENHANCED : VISION_NORMAL) * gs;
@@ -505,32 +497,22 @@ export default function MapCanvas({ sessionId, isDM }) {
           ctx.lineWidth = 1.5 / z; ctx.setLineDash([5 / z, 4 / z]); ctx.stroke(); ctx.setLineDash([]);
         });
       }
-    } else if (autoFog && gs > 0) {
-      // Joueurs : fog automatique (3 zones) — fog MJ reste prioritaire
+    } else if (gs > 0 && (fc.size > 0 || explored.size > 0)) {
+      // Joueurs : fog MJ à 80%, zones mémorisées à 30%, zones vides → rien
       const cx0 = Math.floor(wx0 / gs) - 1, cy0 = Math.floor(wy0 / gs) - 1;
       const cx1 = Math.ceil((wx0 + W) / gs) + 1, cy1 = Math.ceil((wy0 + H) / gs) + 1;
       for (let cx = cx0; cx <= cx1; cx++) {
         for (let cy = cy0; cy <= cy1; cy++) {
           const key = `${cx},${cy}`;
-          let alpha;
           if (fc.has(key)) {
-            alpha = 0.8;          // fog MJ : toujours prioritaire
-          } else if (visible.has(key)) {
-            continue;             // zone visible : aucun fog
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; // fog MJ — opacité maximale
+            ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
           } else if (explored.has(key)) {
-            alpha = 0.3;          // zone mémorisée : légèrement assombrie
-          } else {
-            alpha = 0.8;          // zone inconnue : complètement obscurcie
+            ctx.fillStyle = 'rgba(0,0,0,0.3)'; // zone mémorisée — légèrement assombrie
+            ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
           }
-          ctx.fillStyle = `rgba(0,0,0,${alpha})`;
-          ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
+          // Zone vide (jamais fogée ou déjà révélée) → rien à dessiner
         }
-      }
-    } else {
-      // Fog auto désactivé → fog manuel uniquement (comportement d'origine)
-      if (fc.size > 0) {
-        ctx.fillStyle = fogColorRef.current;
-        fc.forEach(key => { const [cx, cy] = key.split(',').map(Number); ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1); });
       }
     }
 
@@ -618,29 +600,31 @@ export default function MapCanvas({ sessionId, isDM }) {
   }, [drawFrame]);
 
   // Redraw on state changes
-  useEffect(() => { drawFrame(); }, [tokens, paths, panOffset, zoom, mapImage, imgX, imgY, imgScale, fogCells, gridSize, drawColor, drawWidth, fogColor, fogOpacity, tool, drawFrame, autoFogEnabled, visibleCells]);
+  useEffect(() => { drawFrame(); }, [tokens, paths, panOffset, zoom, mapImage, imgX, imgY, imgScale, fogCells, gridSize, drawColor, drawWidth, fogColor, fogOpacity, tool, drawFrame]);
 
-  // Calcule les cellules visibles par les tokens joueurs et enrichit les cellules explorées (mémorisées)
-  const computeVisibleCells = () => {
+  // Révèle le fog MJ dans le radius d'un token joueur — retire les cellules de fogCellsRef
+  // et les marque comme explorées (30% d'opacité). Retourne la liste des cellules retirées.
+  const revealFogForToken = (tok) => {
     const gs = gridSizeRef.current;
-    if (gs <= 0) return;
-    const visible = new Set();
-    tokensRef.current.forEach(tok => {
-      // Les tokens cachés et les ennemis ne contribuent pas à la vision
-      if (tok.hidden || tok.type === 'enemy') return;
-      const vr = tok.nightVision ? VISION_ENHANCED : VISION_NORMAL;
-      const tcx = Math.floor(tok.x / gs);
-      const tcy = Math.floor(tok.y / gs);
-      for (let dx = -vr; dx <= vr; dx++) {
-        for (let dy = -vr; dy <= vr; dy++) {
-          if (Math.sqrt(dx * dx + dy * dy) <= vr) visible.add(`${tcx + dx},${tcy + dy}`);
+    if (gs <= 0 || !tok || tok.hidden || tok.type === 'enemy') return [];
+    const removed = [];
+    const vr = tok.nightVision ? VISION_ENHANCED : VISION_NORMAL;
+    // Centre du token en coordonnées de grille (centré exactement sur le token)
+    const tcx = Math.floor(tok.x / gs);
+    const tcy = Math.floor(tok.y / gs);
+    for (let dx = -vr; dx <= vr; dx++) {
+      for (let dy = -vr; dy <= vr; dy++) {
+        if (Math.sqrt(dx * dx + dy * dy) <= vr) {
+          const key = `${tcx + dx},${tcy + dy}`;
+          if (fogCellsRef.current.has(key)) {
+            fogCellsRef.current.delete(key); // retirer du fog MJ
+            removed.push(key);
+          }
+          exploredCellsRef.current.add(key); // marquer comme explorée
         }
       }
-    });
-    // Les cellules visibles s'ajoutent aux explorées — elles restent mémorisées même si le token s'éloigne
-    visible.forEach(c => exploredCellsRef.current.add(c));
-    visibleCellsRef.current = visible;
-    setVisibleCells(new Set(visible)); // déclenche le re-render du token overlay
+    }
+    return removed;
   };
 
   // Sauvegarde l'état courant avant une mutation pour permettre l'annulation
@@ -753,7 +737,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     // Réception de l'état complet de la map active après (re)connexion.
     // Le serveur envoie cet événement dans join-session pour chaque socket qui rejoint la session.
     // Applique directement les tokens/tracés/fog/grille/image sans reload de page.
-    const onMapSync = ({ mapId, tokens: t, drawings: d, fogCells: fc, gridSize: gs, img_x, img_y, img_scale, exploredCells: ec, autoFogEnabled: afe }) => {
+    const onMapSync = ({ mapId, tokens: t, drawings: d, fogCells: fc, gridSize: gs, img_x, img_y, img_scale, exploredCells: ec }) => {
       if (mapId !== activeMapRef.current?.id) return;
       const toks = Array.isArray(t) ? t : [];
       tokensRef.current = toks; setTokens(toks);
@@ -763,12 +747,9 @@ export default function MapCanvas({ sessionId, isDM }) {
       fogCellsRef.current = cells; setFogCells(cells);
       if (gs) { gridSizeRef.current = gs; setGridSize(gs); }
       if (img_x !== undefined) { setImgX(img_x); setImgY(img_y); setImgScale(img_scale); }
-      // Restaurer les cellules explorées et l'état du fog automatique
+      // Restaurer les cellules explorées depuis la DB
       if (Array.isArray(ec)) exploredCellsRef.current = new Set(ec);
-      if (afe !== undefined) { autoFogEnabledRef.current = afe; setAutoFogEnabled(afe); }
       livePathsRef.current = {};
-      // Recalculer les cellules visibles avec les tokens reçus
-      computeVisibleCells();
       drawFrame();
     };
     socket.on('map-sync', onMapSync);
@@ -789,8 +770,6 @@ export default function MapCanvas({ sessionId, isDM }) {
         drawFrame();
       }
       tokensRef.current = parsed; setTokens(parsed);
-      // Recalculer les cellules visibles à chaque mise à jour finale (nightVision ou déplacement)
-      if (!live && autoFogEnabledRef.current) computeVisibleCells();
     };
 
     // Live drawing segment from another user
@@ -820,9 +799,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     const onMapChanged = ({ map }) => {
       if (!map) return;
       setMaps(prev => prev.map(m => ({ ...m, is_active: m.id === map.id ? 1 : 0 })));
-      // Réinitialiser les données fog auto avant de charger la nouvelle map
+      // Réinitialiser les cellules explorées avant de charger la nouvelle map
       exploredCellsRef.current = new Set();
-      visibleCellsRef.current = new Set(); setVisibleCells(new Set());
       setActiveMap(map); loadFog(map); loadImgTransform(map);
     };
     const onFogUpdate = ({ mapId, fogCells: cells, gridSize: gs }) => {
@@ -883,17 +861,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (mapId !== activeMapRef.current?.id) return;
       mapImageRef.current = null; setMapImage(null); drawFrame();
     };
-    // Réception des cellules explorées/visibles depuis un autre joueur (pendant son drag)
-    const onFogExplored = ({ exploredCells: ec, visibleCells: vc }) => {
+    // Réception des cellules révélées depuis un autre joueur (pendant son drag)
+    // removedCells : cellules retirées du fog MJ, exploredCells : zones mémorisées complètes
+    const onFogExplored = ({ removedCells, exploredCells: ec }) => {
+      if (Array.isArray(removedCells)) {
+        removedCells.forEach(c => fogCellsRef.current.delete(c));
+        setFogCells(new Set(fogCellsRef.current)); // sync React state pour le token overlay
+      }
       if (Array.isArray(ec)) ec.forEach(c => exploredCellsRef.current.add(c));
-      if (Array.isArray(vc)) { visibleCellsRef.current = new Set(vc); setVisibleCells(new Set(vc)); }
-      drawFrame();
-    };
-    // Activation/désactivation du fog automatique diffusée par le MJ
-    const onAutoFogUpdated = ({ enabled }) => {
-      autoFogEnabledRef.current = enabled; setAutoFogEnabled(enabled);
-      if (!enabled) { visibleCellsRef.current = new Set(); setVisibleCells(new Set()); }
-      else computeVisibleCells();
       drawFrame();
     };
 
@@ -916,7 +891,6 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-grid-size', onGridSize);
     socket.on('map-image-cleared', onMapImageCleared);
     socket.on('map-fog-explored', onFogExplored);
-    socket.on('map-auto-fog-updated', onAutoFogUpdated);
     return () => {
       socket.off('connect', onConnect);
       socket.off('map-token-update', onTokenUpdate);
@@ -938,7 +912,6 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-grid-size', onGridSize);
       socket.off('map-image-cleared', onMapImageCleared);
       socket.off('map-fog-explored', onFogExplored);
-      socket.off('map-auto-fog-updated', onAutoFogUpdated);
       socket.off('map-sync', onMapSync);
     };
   }, [socket, startLerpAnimation, drawFrame]);
@@ -974,24 +947,21 @@ export default function MapCanvas({ sessionId, isDM }) {
     const pths = typeof activeMap.drawings === 'string' ? JSON.parse(activeMap.drawings) : (activeMap.drawings || []);
     pathsRef.current = pths; setPaths(pths);
     livePathsRef.current = {};
-    // Réinitialiser les données fog automatique avant de charger la nouvelle map
+    // Réinitialiser les cellules explorées avant de charger la nouvelle map
     exploredCellsRef.current = new Set();
-    visibleCellsRef.current = new Set(); setVisibleCells(new Set());
     loadFog(activeMap); loadImgTransform(activeMap);
   }, [activeMap, drawFrame]);
 
   const loadFog = (map) => {
     try {
       const raw = JSON.parse(map.fog_data || '[]');
-      const cells    = Array.isArray(raw) ? raw        : (raw.cells    || []);
-      const gs       = Array.isArray(raw) ? null       : raw.gs;
-      // Champs fog automatique (format étendu : {cells, gs, explored, autoFog})
-      const explored = Array.isArray(raw) ? []    : (raw.explored ?? []);
-      const afe      = Array.isArray(raw) ? true  : (raw.autoFog  ?? true); // true par défaut si jamais sauvegardé
+      // Format ancien : tableau simple de cellules. Format nouveau : {cells, gs, explored}
+      const cells    = Array.isArray(raw) ? raw : (raw.cells    || []);
+      const gs       = Array.isArray(raw) ? null : raw.gs;
+      const explored = Array.isArray(raw) ? []   : (raw.explored || []);
       const s = new Set(cells);
       fogCellsRef.current = s; setFogCells(s);
       exploredCellsRef.current = new Set(explored);
-      autoFogEnabledRef.current = afe; setAutoFogEnabled(afe);
       if (gs) { gridSizeRef.current = gs; setGridSize(gs); }
     } catch { fogCellsRef.current = new Set(); setFogCells(new Set()); }
   };
@@ -1246,17 +1216,23 @@ export default function MapCanvas({ sessionId, isDM }) {
         lastDragEmit.current = now;
         socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: isDraggingRef.current.id, x: sp.x, y: sp.y, live: true });
       }
-      // Fog automatique — recalculer les cellules visibles toutes les 100ms pendant le drag
-      if (autoFogEnabledRef.current && gridSizeRef.current > 0 && now - lastFogUpdateRef.current > 100) {
+      // Révélation du fog MJ — toutes les 50ms pendant le drag pour une fluidité maximale
+      if (gridSizeRef.current > 0 && now - lastFogUpdateRef.current > 50) {
         lastFogUpdateRef.current = now;
-        computeVisibleCells();
-        drawFrame(); // redessiner immédiatement après le recalcul pour que le fog disparaisse en temps réel
-        if (socket) {
-          socket.emit('map-fog-explored', {
-            sessionId,
-            exploredCells: [...exploredCellsRef.current],
-            visibleCells: [...visibleCellsRef.current]
-          });
+        const currentTok = tokensRef.current.find(t => t.id === isDraggingRef.current.id);
+        if (currentTok && !currentTok.hidden && currentTok.type !== 'enemy') {
+          const removed = revealFogForToken(currentTok);
+          if (removed.length > 0) {
+            setFogCells(new Set(fogCellsRef.current)); // sync React state pour le token overlay
+            drawFrame(); // redessiner pour afficher le fog révélé en temps réel
+            if (socket) {
+              socket.emit('map-fog-explored', {
+                sessionId,
+                removedCells: removed,
+                exploredCells: [...exploredCellsRef.current]
+              });
+            }
+          }
         }
       }
     }
@@ -1303,13 +1279,13 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (mv) { selectedTokenRef.current = mv; setSelectedToken(mv); }
       setTokens([...tokensRef.current]); // sync React state once after drag (not per-frame)
       if (mv) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: wasDragging.id, x: mv.x, y: mv.y, live: false });
-      // Sauvegarder les cellules explorées en DB après un déplacement (fog auto activé)
-      if (autoFogEnabledRef.current && activeMapRef.current) {
+      // Persister fogCells + exploredCells en DB après le déplacement (fog unifié)
+      if (activeMapRef.current && !wasDragging.hidden && wasDragging.type !== 'enemy') {
         socket.emit('map-fog-explored', {
           sessionId,
           mapId: activeMapRef.current.id,
+          fogCells: [...fogCellsRef.current],
           exploredCells: [...exploredCellsRef.current],
-          visibleCells: [...visibleCellsRef.current],
           save: true
         });
       }
@@ -1473,23 +1449,6 @@ export default function MapCanvas({ sessionId, isDM }) {
               style={{ width: '55px', cursor: 'pointer' }} />
           </div>
         )}
-        {/* Fog automatique — active le système de vision par radius de token */}
-        {isDM && (
-          <button
-            className={`btn btn-sm ${autoFogEnabled ? 'btn-primary' : 'btn-secondary'}`}
-            title={autoFogEnabled ? 'Désactiver le fog automatique' : 'Activer le fog automatique (vision par radius token)'}
-            onClick={() => {
-              const next = !autoFogEnabled;
-              autoFogEnabledRef.current = next;
-              setAutoFogEnabled(next);
-              if (!next) { visibleCellsRef.current = new Set(); setVisibleCells(new Set()); }
-              else computeVisibleCells();
-              drawFrame();
-              if (socket) socket.emit('map-auto-fog', { sessionId, mapId: activeMapRef.current?.id, enabled: next });
-            }}
-          >🌙 Fog auto</button>
-        )}
-
         {tool === 'token' && (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
             <input type="text" value={newTokenName} onChange={e => setNewTokenName(e.target.value)} placeholder="Nom" style={{ width: '90px', padding: '2px 5px', fontSize: '0.8rem' }} />
@@ -1659,8 +1618,8 @@ export default function MapCanvas({ sessionId, isDM }) {
             {tokens.filter(t => !t.hidden || isDM).map(t => {
               const r = clamp(t.radius || 22, 10, 120);
               const _ck = gridSize > 0 ? `${Math.floor(t.x / gridSize)},${Math.floor(t.y / gridSize)}` : '';
-              // Token caché par le fog MJ ou par le fog automatique (hors champ de vision)
-              const inFog = !isDM && gridSize > 0 && (fogCells.has(_ck) || (autoFogEnabled && !visibleCells.has(_ck)));
+              // Token caché uniquement si la cellule est dans le fog MJ (peint manuellement)
+              const inFog = !isDM && gridSize > 0 && fogCells.has(_ck);
               return (
                 <div
                   key={t.id}
