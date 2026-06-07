@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth, API } from '../contexts/AuthContext';
 import { parseDice, rollFromExpr } from '../utils/dice';
+import { formatDate } from '../utils/date';
 
 // Props :
 //   sessionId   — id de la session courante
@@ -99,7 +100,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
     setInput('');
   };
 
-  const formatTime = (ts) => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (ts) => formatDate(ts);
 
   // Nom d'un membre à partir de son id (pour afficher le destinataire d'un message privé)
   const getMemberName = (userId) => members.find(m => m.id === userId)?.username || 'Joueur';

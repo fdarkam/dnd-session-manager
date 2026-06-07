@@ -244,6 +244,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   const activeMapRef = useRef(null);
   const otherCursorsRef = useRef({});
   const toolRef = useRef('move');
+  const copiedTokenRef = useRef(null);   // token copié via Ctrl+C
+  const undoStackRef = useRef([]);       // pile d'annulation (max 20 entrées)
+  const redoStackRef = useRef([]);       // pile de rétablissement
   // ── React state (drives re-render / UI only) ──
   const [maps, setMaps] = useState([]);
   const [activeMap, setActiveMap] = useState(null);
@@ -499,12 +502,84 @@ export default function MapCanvas({ sessionId, isDM }) {
   // Redraw on state changes
   useEffect(() => { drawFrame(); }, [tokens, paths, panOffset, zoom, mapImage, imgX, imgY, imgScale, fogCells, gridSize, drawColor, drawWidth, fogColor, fogOpacity, tool, drawFrame]);
 
-  // Delete key
+  // Sauvegarde l'état courant avant une mutation pour permettre l'annulation
+  const saveUndoState = () => {
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-19),
+      { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) }
+    ];
+    redoStackRef.current = [];
+  };
+
+  // Delete key / Ctrl+C / Ctrl+V / Ctrl+Z / Ctrl+Y
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+
+      // Ctrl+C — copier le token sélectionné
+      if (e.ctrlKey && e.key === 'c') {
+        if (selectedTokenRef.current) copiedTokenRef.current = { ...selectedTokenRef.current };
+        return;
+      }
+
+      // Ctrl+V — coller le token copié avec décalage +30px
+      if (e.ctrlKey && e.key === 'v') {
+        if (!copiedTokenRef.current) return;
+        e.preventDefault();
+        saveUndoState();
+        const newToken = { ...copiedTokenRef.current, id: crypto.randomUUID(), x: copiedTokenRef.current.x + 30, y: copiedTokenRef.current.y + 30, hidden: false };
+        tokensRef.current = [...tokensRef.current, newToken];
+        setTokens([...tokensRef.current]);
+        drawFrame();
+        if (socket) socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current?.id, token: newToken, allTokens: tokensRef.current });
+        return;
+      }
+
+      // Ctrl+Z — annuler la dernière action locale
+      if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        if (undoStackRef.current.length === 0) return;
+        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) };
+        redoStackRef.current = [...redoStackRef.current.slice(-19), current];
+        const prev = undoStackRef.current[undoStackRef.current.length - 1];
+        undoStackRef.current = undoStackRef.current.slice(0, -1);
+        tokensRef.current = prev.tokens; setTokens(prev.tokens);
+        pathsRef.current = prev.drawings; setPaths(prev.drawings);
+        fogCellsRef.current = prev.fogCells; setFogCells(prev.fogCells);
+        drawFrame();
+        if (socket && activeMapRef.current) {
+          socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current.id, allTokens: prev.tokens });
+          socket.emit('map-drawings-clear', { sessionId, mapId: activeMapRef.current.id });
+          prev.drawings.forEach(p => socket.emit('map-drawing', { sessionId, mapId: activeMapRef.current.id, path: p }));
+          socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: Array.from(prev.fogCells), gridSize: gridSizeRef.current });
+        }
+        return;
+      }
+
+      // Ctrl+Y — rétablir l'action annulée
+      if (e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        if (redoStackRef.current.length === 0) return;
+        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) };
+        undoStackRef.current = [...undoStackRef.current.slice(-19), current];
+        const next = redoStackRef.current[redoStackRef.current.length - 1];
+        redoStackRef.current = redoStackRef.current.slice(0, -1);
+        tokensRef.current = next.tokens; setTokens(next.tokens);
+        pathsRef.current = next.drawings; setPaths(next.drawings);
+        fogCellsRef.current = next.fogCells; setFogCells(next.fogCells);
+        drawFrame();
+        if (socket && activeMapRef.current) {
+          socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current.id, allTokens: next.tokens });
+          socket.emit('map-drawings-clear', { sessionId, mapId: activeMapRef.current.id });
+          next.drawings.forEach(p => socket.emit('map-drawing', { sessionId, mapId: activeMapRef.current.id, path: p }));
+          socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: Array.from(next.fogCells), gridSize: gridSizeRef.current });
+        }
+        return;
+      }
+
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
       // Map-edit mode: Delete clears the background image (with confirmation)
       if (toolRef.current === 'map-edit' && isDMRef.current && mapImageRef.current) {
         e.preventDefault();
@@ -842,9 +917,10 @@ export default function MapCanvas({ sessionId, isDM }) {
         return;
       }
     }
-    if ((toolRef.current === 'fog-add' || toolRef.current === 'fog-erase') && isDM) { fogPainting.current = true; paintFog(pos.x, pos.y, toolRef.current === 'fog-add'); return; }
+    if ((toolRef.current === 'fog-add' || toolRef.current === 'fog-erase') && isDM) { saveUndoState(); fogPainting.current = true; paintFog(pos.x, pos.y, toolRef.current === 'fog-add'); return; }
     if (toolRef.current === 'erase' && isDM) {
       eraserActive.current = true;
+      saveUndoState();
       const r = eraserSize / zoomRef.current;
       const ids = pathsRef.current.filter(p => p.points?.some(pt => { const dx = pt.x - pos.x, dy = pt.y - pos.y; return dx * dx + dy * dy < r * r; })).map(p => p.id);
       if (ids.length) {
@@ -861,6 +937,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       setDrawing(true); return;
     }
     if (toolRef.current === 'token' && newTokenName.trim()) {
+      saveUndoState();
       const sp = snapPos(pos.x, pos.y);
       const tok = { id: `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`, name: newTokenName, color: newTokenColor, borderColor: newTokenBorderColor, radius: clamp(newTokenRadius, 10, 120), image: newTokenImage, x: sp.x, y: sp.y, hidden: newTokenHidden, createdBy: user.id, createdByName: user.username };
       const upd = [...tokensRef.current, tok]; tokensRef.current = upd; setTokens(upd); drawFrame();
@@ -890,7 +967,7 @@ export default function MapCanvas({ sessionId, isDM }) {
           }
         }
         const canManage = isDM || !clicked.createdBy || clicked.createdBy === user?.id;
-        if (canManage) { isDraggingRef.current = clicked; setDragging(clicked); }
+        if (canManage) { saveUndoState(); isDraggingRef.current = clicked; setDragging(clicked); }
         return;
       }
       setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false);
@@ -1020,6 +1097,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       resizingToken.current = null;
     }
     if (drawing && currentPathRef.current.length > 1) {
+      saveUndoState();
       // Use the SAME id that was used for live segments → receivers clear the live preview
       const newPath = { id: currentPathIdRef.current, color: drawColorRef.current, width: drawWidthRef.current, points: currentPathRef.current };
       const next = [...pathsRef.current, newPath]; pathsRef.current = next; setPaths(next);
@@ -1067,6 +1145,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (socket) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: next, live: false });
   };
   const deleteToken = (id) => {
+    saveUndoState();
     const next = tokensRef.current.filter(t => t.id !== id);
     tokensRef.current = next; setTokens(next); selectedTokenRef.current = null; setSelectedToken(null); setShowTokenEdit(false); drawFrame();
     if (socket) socket.emit('map-token-delete', { sessionId, mapId: activeMapRef.current?.id, tokenId: id });
