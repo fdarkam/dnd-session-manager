@@ -128,7 +128,11 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
   const [image, setImage] = useState(token.image || null);
   const [hidden, setHidden] = useState(!!token.hidden);
   const [locked, setLocked] = useState(!!token.locked);
-  const [nightVision, setNightVision] = useState(!!token.nightVision);
+  // visionRadius : 0 = aveugle (MJ only), 'normal' = standard, 'enhanced' = nocturne étendue
+  // Fallback sur nightVision (boolean) pour les anciens tokens sans visionRadius
+  const [visionRadius, setVisionRadius] = useState(
+    token.visionRadius !== undefined ? token.visionRadius : (token.nightVision ? 'enhanced' : 'normal')
+  );
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
@@ -140,7 +144,9 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
   useEffect(() => {
     setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff');
     setRadius(token.radius || 22); setImage(token.image || null); setHidden(!!token.hidden);
-    setLocked(!!token.locked); setNightVision(!!token.nightVision);
+    setLocked(!!token.locked);
+    // Sync visionRadius — priorité à visionRadius, fallback sur nightVision pour les anciens tokens
+    setVisionRadius(token.visionRadius !== undefined ? token.visionRadius : (token.nightVision ? 'enhanced' : 'normal'));
   }, [token.id]);
 
   // Repositionner quand un token différent est ouvert
@@ -182,7 +188,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
     } catch { /* ignore */ }
     setUploading(false);
   };
-  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision });
+  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius, nightVision: visionRadius === 'enhanced' });
 
   return (
     <div style={{ position: 'absolute', left: pos.x, top: pos.y, width: 240, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
@@ -213,42 +219,55 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
         </div>
         {isDM && (
           <>
-            {/* Fix 3: Masquer | Verr. | Nuit dans la même rangée */}
-            <div style={{ display: 'flex', gap: '5px' }}>
+            {/* Fix 1 : boutons sur une seule ligne — gap + padding compacts pour tenir dans 240px */}
+            <div style={{ display: 'flex', gap: '4px', width: '100%' }}>
               <button
                 className={`btn btn-sm ${hidden ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked, nightVision }); }}
-                style={{ flex: 1, fontSize: '0.73rem' }}
+                onClick={() => { const next = !hidden; setHidden(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden: next, locked, visionRadius, nightVision: visionRadius === 'enhanced' }); }}
+                style={{ flex: 1, fontSize: '12px', padding: '6px 4px' }}
               >{hidden ? '👁️ Révéler' : '🙈 Masquer'}</button>
               <button
                 className={`btn btn-sm ${locked ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next, nightVision }); }}
-                style={{ flex: 1, fontSize: '0.73rem' }}
+                onClick={() => { const next = !locked; setLocked(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked: next, visionRadius, nightVision: visionRadius === 'enhanced' }); }}
+                style={{ flex: 1, fontSize: '12px', padding: '6px 4px' }}
               >{locked ? '🔓 Déverr.' : '🔒 Verr.'}</button>
               <button
-                className={`btn btn-sm ${nightVision ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => { const next = !nightVision; setNightVision(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: next }); }}
-                style={{ flex: 1, fontSize: '0.73rem' }}
+                className={`btn btn-sm ${visionRadius === 'enhanced' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => { const next = visionRadius === 'enhanced' ? 'normal' : 'enhanced'; setVisionRadius(next); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: next, nightVision: next === 'enhanced' }); }}
+                style={{ flex: 1, fontSize: '12px', padding: '6px 4px' }}
                 title="Vision nocturne — radius de vision étendu à 6 cases"
-              >{nightVision ? '🌙 Nuit ✓' : '🌙 Nuit'}</button>
-            </div>
-            {/* Fix 3: radio Vision Normal / Étendu */}
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.75rem', padding: '2px 0' }}>
-              <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Vision :</span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: !nightVision ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                <input type="radio" name={`vision-${token.id}`} checked={!nightVision}
-                  onChange={() => { setNightVision(false); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: false }); }}
-                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
-                Normal
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: nightVision ? 'var(--accent-primary)' : 'var(--text-muted)' }}>
-                <input type="radio" name={`vision-${token.id}`} checked={nightVision}
-                  onChange={() => { setNightVision(true); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, nightVision: true }); }}
-                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
-                Étendu
-              </label>
+              >{visionRadius === 'enhanced' ? '🌙 Nuit ✓' : '🌙 Nuit'}</button>
             </div>
           </>
+        )}
+        {/* Fix 2 : sélecteur Vision visible à tous les éditeurs — option Aveugle réservée au MJ */}
+        {canEdit && (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.75rem', padding: '2px 0' }}>
+            <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Vision :</span>
+            {/* Aveugle : MJ uniquement — le joueur ne peut pas lever cette restriction */}
+            {isDM && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: visionRadius === 0 ? 'var(--accent-danger)' : 'var(--text-muted)' }}>
+                <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 0}
+                  onChange={() => { setVisionRadius(0); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 0, nightVision: false }); }}
+                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
+                🚫 Aveugle
+              </label>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: visionRadius === 'normal' ? 'var(--text-primary)' : 'var(--text-muted)', opacity: visionRadius === 0 && !isDM ? 0.5 : 1 }}>
+              <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 'normal'}
+                disabled={visionRadius === 0 && !isDM}
+                onChange={() => { setVisionRadius('normal'); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 'normal', nightVision: false }); }}
+                style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
+              Normal
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: visionRadius === 'enhanced' ? 'var(--accent-primary)' : 'var(--text-muted)', opacity: visionRadius === 0 && !isDM ? 0.5 : 1 }}>
+              <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 'enhanced'}
+                disabled={visionRadius === 0 && !isDM}
+                onChange={() => { setVisionRadius('enhanced'); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 'enhanced', nightVision: true }); }}
+                style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
+              Étendu
+            </label>
+          </div>
         )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
       </div>
@@ -626,9 +645,11 @@ export default function MapCanvas({ sessionId, isDM }) {
   // Cercle parfait : tolérance +0.5 pour inclure les cellules tangentes au bord du rayon.
   const revealFogForToken = (tok) => {
     const gs = gridSizeRef.current;
-    if (gs <= 0 || !tok || tok.hidden || tok.type === 'enemy') return [];
+    // Fix 3 : tokens cachés ou aveugles (visionRadius === 0) n'effacent jamais le fog
+    if (gs <= 0 || !tok || tok.hidden || tok.type === 'enemy' || tok.visionRadius === 0) return [];
     const removed = [];
-    const vr = tok.nightVision ? VISION_ENHANCED : VISION_NORMAL;
+    // Rayon : 'enhanced' ou nightVision (rétrocompat anciens tokens) → 6 cases, sinon 3 cases
+    const vr = (tok.visionRadius === 'enhanced' || (tok.visionRadius === undefined && tok.nightVision)) ? VISION_ENHANCED : VISION_NORMAL;
     const tcx = Math.floor(tok.x / gs);
     const tcy = Math.floor(tok.y / gs);
     for (let dx = -vr; dx <= vr; dx++) {
@@ -1112,7 +1133,8 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (toolRef.current === 'token' && newTokenName.trim()) {
       saveUndoState();
       const sp = snapPos(pos.x, pos.y);
-      const tok = { id: `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`, name: newTokenName, color: newTokenColor, borderColor: newTokenBorderColor, radius: clamp(newTokenRadius, 10, 120), image: newTokenImage, x: sp.x, y: sp.y, hidden: newTokenHidden, createdBy: user.id, createdByName: user.username };
+      // Fix 4 : visionRadius = 'normal' par défaut — le MJ peut le changer ensuite
+      const tok = { id: `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`, name: newTokenName, color: newTokenColor, borderColor: newTokenBorderColor, radius: clamp(newTokenRadius, 10, 120), image: newTokenImage, x: sp.x, y: sp.y, hidden: newTokenHidden, visionRadius: 'normal', nightVision: false, createdBy: user.id, createdByName: user.username };
       const upd = [...tokensRef.current, tok]; tokensRef.current = upd; setTokens(upd); drawFrame();
       if (socket) socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current?.id, token: tok, allTokens: upd });
       return;
