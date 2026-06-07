@@ -47,9 +47,7 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [joinAc, setJoinAc] = useState('');
   const [myCharacter, setMyCharacter] = useState(null);
 
-  // Fix 1 — valeur saisie par entité (entityId → chaîne signée ex: "10", "-5", "+10")
   const [hpDeltas, setHpDeltas] = useState({});
-  // Flash PV visuel (entityId → { text, color })
   const [hpFlash, setHpFlash] = useState({});
 
   const [statusOpen, setStatusOpen] = useState(null);
@@ -77,16 +75,13 @@ export default function CombatTracker({ sessionId, isDM }) {
     const onUpdated = (data) => setEncounter(normalize(data));
     const onTurnChanged = (data) => setEncounter(normalize(data));
 
-    // Sync PV fiche → combat
     const onCharUpdated = (character) => {
       const prev = encounterRef.current;
       if (!prev?.entities) return;
       const hasMatch = prev.entities.some(e => e.characterId === character.id);
       if (!hasMatch) return;
       const entities = prev.entities.map(e =>
-        e.characterId === character.id
-          ? { ...e, hp: character.hp_current ?? e.hp }
-          : e
+        e.characterId === character.id ? { ...e, hp: character.hp_current ?? e.hp } : e
       );
       const updated = { ...prev, entities };
       setEncounter(updated);
@@ -229,8 +224,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     broadcastUpdate(updated);
   };
 
-  // Appliquer un delta de PV avec flash visuel
-  // forceDelta : valeur signée imposée (boutons + et -), sinon on lit hpDeltas[entityId]
   const applyHPDelta = (entityId, forceDelta) => {
     const delta = forceDelta !== undefined
       ? forceDelta
@@ -253,7 +246,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         character: { id: updatedEntity.characterId, hp_current: updatedEntity.hp },
       });
     }
-    // Flash vert pour soins, rouge pour dégâts
     const flashText = delta > 0 ? `+${delta}` : `${delta}`;
     const flashColor = delta > 0 ? '#22c55e' : '#f87171';
     setHpFlash(prev => ({ ...prev, [entityId]: { text: flashText, color: flashColor } }));
@@ -261,22 +253,19 @@ export default function CombatTracker({ sessionId, isDM }) {
     setHpDeltas(prev => ({ ...prev, [entityId]: '' }));
   };
 
-  // Fix 1 — Signe automatique sur l'input PV
-  // - : transforme la valeur courante en négative (dégâts)
-  // + : transforme la valeur courante en positive (soins)
-  // Entrée : applique la valeur telle quelle (signée)
+  // Signe automatique : - passe la valeur en négatif, + en positif, Entrée applique telle quelle
   const handleHpKeyDown = (entityId, e) => {
     if (e.key === '-') {
       e.preventDefault();
       setHpDeltas(prev => {
         const abs = Math.abs(parseInt(prev[entityId] || '') || 0);
-        return { ...prev, [entityId]: abs > 0 ? String(-abs) : prev[entityId] ?? '' };
+        return { ...prev, [entityId]: abs > 0 ? String(-abs) : (prev[entityId] ?? '') };
       });
     } else if (e.key === '+') {
       e.preventDefault();
       setHpDeltas(prev => {
         const abs = Math.abs(parseInt(prev[entityId] || '') || 0);
-        return { ...prev, [entityId]: abs > 0 ? String(abs) : prev[entityId] ?? '' };
+        return { ...prev, [entityId]: abs > 0 ? String(abs) : (prev[entityId] ?? '') };
       });
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -284,12 +273,13 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
-  // Fix 2 — Helpers pour les boutons + et - inline
-  // Lit la valeur absolue de l'input et l'applique avec le signe voulu
+  // Bouton + : applique la valeur absolue en positif (soins)
   const applyPositive = (entityId) => {
     const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
     if (abs > 0) applyHPDelta(entityId, abs);
   };
+
+  // Bouton − : applique la valeur absolue en négatif (dégâts)
   const applyNegative = (entityId) => {
     const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
     if (abs > 0) applyHPDelta(entityId, -abs);
@@ -472,80 +462,126 @@ export default function CombatTracker({ sessionId, isDM }) {
                   {entity.type === 'enemy' ? '💀' : '🛡️'}
                 </span>
 
-                {/* Nom + barre HP + CA + badges statuts */}
+                {/* Nom + zone PV + statuts */}
                 <div style={{ flex: 1, minWidth: '80px' }}>
                   <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{entity.name}</div>
 
-                  {/* Fix 2 — Ligne PV : barre + texte + CA + input inline */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px', flexWrap: 'wrap' }}>
+                  {/*
+                    Fix layout — Ligne PV structurée en deux niveaux :
+                    1. Conteneur principal (flex, wrap) : barre HP à gauche, puis groupe [PV+input] à droite
+                    2. Groupe [PV+input] en nowrap pour que le texte et le pill group ne se séparent jamais
+                  */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+
+                    {/* Barre HP — peut passer à la ligne si la fenêtre est très étroite */}
                     <div className="hp-bar-container" style={{ width: '60px', height: '5px', flexShrink: 0 }}>
                       <div
                         className={`hp-bar ${hpClass}`}
                         style={{ width: `${Math.min(100, Math.max(0, hpPct))}%` }}
                       />
                     </div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                      {entity.hp}/{hpMax} PV
-                      {/* Flash vert (soins) ou rouge (dégâts) après application */}
-                      {flash && (
-                        <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
-                          {flash.text}
+
+                    {/*
+                      Groupe solidaire PV + input : flexWrap nowrap + flexShrink 0
+                      garantit que "23/23 PV [input][+][−]" reste toujours sur une seule ligne
+                    */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap', flexShrink: 0 }}>
+
+                      {/* Texte PV + flash */}
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {entity.hp}/{hpMax} PV
+                        {flash && (
+                          <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
+                            {flash.text}
+                          </span>
+                        )}
+                      </span>
+
+                      {/* CA */}
+                      {entity.ac != null && (
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          🛡 {entity.ac}
                         </span>
                       )}
-                    </span>
-                    {entity.ac != null && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        🛡 {entity.ac}
-                      </span>
-                    )}
 
-                    {/* Fix 2 — Input PV inline, visible en permanence si le joueur peut éditer */}
-                    {canEdit && (
-                      <>
-                        {/* Fix 1 — type text pour intercepter + et - avant le navigateur */}
-                        <input
-                          type="text"
-                          value={hpDeltas[entity.id] || ''}
-                          onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
-                          onKeyDown={e => handleHpKeyDown(entity.id, e)}
-                          placeholder="PV"
-                          title="Tapez un nombre puis + (soins) ou − (dégâts) ou Entrée"
-                          style={{
-                            width: '42px', textAlign: 'center',
-                            fontSize: '0.72rem', padding: '2px 3px',
-                            flexShrink: 0,
-                          }}
-                        />
-                        {/* Bouton + : applique la valeur absolue en positif (soins) */}
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => applyPositive(entity.id)}
-                          title="Soins (+)"
-                          style={{
-                            padding: '1px 6px', fontSize: '0.78rem', fontWeight: 700,
-                            color: '#22c55e', background: 'rgba(34,197,94,0.12)',
-                            border: '1px solid rgba(34,197,94,0.35)', borderRadius: '4px',
-                            cursor: 'pointer', flexShrink: 0,
-                          }}
-                        >
-                          +
-                        </button>
-                        {/* Bouton − : applique la valeur absolue en négatif (dégâts) */}
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => applyNegative(entity.id)}
-                          title="Dégâts (−)"
-                          style={{
-                            padding: '1px 6px', fontSize: '0.78rem', fontWeight: 700,
-                            color: '#f87171', background: 'rgba(248,113,113,0.12)',
-                            border: '1px solid rgba(248,113,113,0.35)', borderRadius: '4px',
-                            cursor: 'pointer', flexShrink: 0,
-                          }}
-                        >
-                          −
-                        </button>
-                      </>
-                    )}
+                      {/*
+                        Fix layout — Pill group input + boutons :
+                        - gap: 0 et bordures partagées donnent un rendu "composant unique"
+                        - border-radius seulement sur les coins extérieurs (gauche de l'input, droite du bouton −)
+                        - flexShrink: 0 empêche le groupe de se comprimer
+                      */}
+                      {canEdit && (
+                        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          <input
+                            type="text"
+                            value={hpDeltas[entity.id] || ''}
+                            onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
+                            onKeyDown={e => handleHpKeyDown(entity.id, e)}
+                            placeholder="PV"
+                            title="Tapez un nombre · − dégâts · + soins · Entrée valider"
+                            style={{
+                              width: '48px',
+                              height: '26px',
+                              boxSizing: 'border-box',
+                              border: '1px solid var(--border-color)',
+                              borderRight: 'none',
+                              borderRadius: '4px 0 0 4px',
+                              textAlign: 'center',
+                              fontSize: '0.72rem',
+                              padding: '0 4px',
+                              background: 'var(--bg-secondary)',
+                              color: 'var(--text-primary)',
+                              outline: 'none',
+                            }}
+                          />
+                          {/* Bouton + : arrondi aucun (milieu du pill group) */}
+                          <button
+                            onClick={() => applyPositive(entity.id)}
+                            title="Soins"
+                            style={{
+                              width: '28px',
+                              height: '26px',
+                              boxSizing: 'border-box',
+                              border: '1px solid var(--border-color)',
+                              borderRight: 'none',
+                              borderRadius: 0,
+                              background: 'rgba(34,197,94,0.13)',
+                              color: '#22c55e',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              lineHeight: 1,
+                              cursor: 'pointer',
+                              padding: 0,
+                              flexShrink: 0,
+                            }}
+                          >
+                            +
+                          </button>
+                          {/* Bouton − : arrondi uniquement à droite (fin du pill group) */}
+                          <button
+                            onClick={() => applyNegative(entity.id)}
+                            title="Dégâts"
+                            style={{
+                              width: '28px',
+                              height: '26px',
+                              boxSizing: 'border-box',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '0 4px 4px 0',
+                              background: 'rgba(248,113,113,0.13)',
+                              color: '#f87171',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              lineHeight: 1,
+                              cursor: 'pointer',
+                              padding: 0,
+                              flexShrink: 0,
+                            }}
+                          >
+                            −
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Badges statuts actifs — cliquer pour retirer */}
@@ -583,7 +619,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                   ✦
                 </button>
 
-                {/* Bouton retirer du combat — visible si le joueur peut éditer cette entité */}
+                {/* Bouton retirer — fin de ligne, visible si le joueur peut éditer */}
                 {canEdit && (
                   <button
                     className="btn-icon"
