@@ -189,6 +189,11 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
     setUploading(false);
   };
   const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius, nightVision: visionRadius === 'enhanced' });
+  // Met à jour visionRadius et synchronise nightVision (rétrocompat) en un seul appel
+  const updateVision = (vr) => {
+    setVisionRadius(vr);
+    onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: vr, nightVision: vr === 'enhanced' });
+  };
 
   return (
     <div style={{ position: 'absolute', left: pos.x, top: pos.y, width: 240, background: 'var(--bg-secondary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', zIndex: 300, boxShadow: '0 8px 32px rgba(0,0,0,0.7)', padding: '10px' }}>
@@ -240,33 +245,31 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos }
             </div>
           </>
         )}
-        {/* Fix 2 : sélecteur Vision visible à tous les éditeurs — option Aveugle réservée au MJ */}
+        {/* Sélecteur Vision compact : boutons colorés sur une ligne, sans débordement */}
         {canEdit && (
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.75rem', padding: '2px 0' }}>
-            <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Vision :</span>
-            {/* Aveugle : MJ uniquement — le joueur ne peut pas lever cette restriction */}
-            {isDM && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: visionRadius === 0 ? 'var(--accent-danger)' : 'var(--text-muted)' }}>
-                <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 0}
-                  onChange={() => { setVisionRadius(0); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 0, nightVision: false }); }}
-                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
-                🚫 Aveugle
-              </label>
-            )}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: visionRadius === 'normal' ? 'var(--text-primary)' : 'var(--text-muted)', opacity: visionRadius === 0 && !isDM ? 0.5 : 1 }}>
-              <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 'normal'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
+            <span style={{ fontSize: '11px', color: '#aaa', flexShrink: 0 }}>Vision :</span>
+            <div style={{ display: 'flex', gap: '3px', flex: 1 }}>
+              {/* Aveugle : MJ uniquement — le joueur ne peut pas lever cette restriction */}
+              {isDM && (
+                <button
+                  onClick={() => updateVision(0)}
+                  style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 0 ? '#c0392b' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
+                >🚫 Aveugle</button>
+              )}
+              {/* Normal — désactivé pour les joueurs si le MJ a posé Aveugle */}
+              <button
+                onClick={() => updateVision('normal')}
                 disabled={visionRadius === 0 && !isDM}
-                onChange={() => { setVisionRadius('normal'); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 'normal', nightVision: false }); }}
-                style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
-              Normal
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: visionRadius === 'enhanced' ? 'var(--accent-primary)' : 'var(--text-muted)', opacity: visionRadius === 0 && !isDM ? 0.5 : 1 }}>
-              <input type="radio" name={`vision-${token.id}`} checked={visionRadius === 'enhanced'}
+                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'normal' ? '#2d6a4f' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: '#fff', opacity: visionRadius === 0 && !isDM ? 0.4 : 1 }}
+              >Normal</button>
+              {/* Étendu — désactivé pour les joueurs si le MJ a posé Aveugle */}
+              <button
+                onClick={() => updateVision('enhanced')}
                 disabled={visionRadius === 0 && !isDM}
-                onChange={() => { setVisionRadius('enhanced'); onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius: 'enhanced', nightVision: true }); }}
-                style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }} />
-              Étendu
-            </label>
+                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'enhanced' ? '#1a4a8a' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: '#fff', opacity: visionRadius === 0 && !isDM ? 0.4 : 1 }}
+              >Étendu</button>
+            </div>
           </div>
         )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
