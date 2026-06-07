@@ -315,9 +315,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const mouseWorldPosRef = useRef({ x: 0, y: 0 }); // position monde courante de la souris
   const undoStackRef = useRef([]);       // pile d'annulation (max 20 entrées)
   const redoStackRef = useRef([]);       // pile de rétablissement
-  // ── Fog unifié ──
-  const exploredCellsRef = useRef(new Set()); // cellules traversées par les joueurs (30% d'opacité)
-  const lastFogUpdateRef = useRef(0);         // throttle du recalcul fog pendant drag (50ms)
+  // ── Fog simplifié — un seul état : fogCellsRef (peint par le MJ) ──
+  const lastFogUpdateRef = useRef(0); // throttle du recalcul fog pendant drag (50ms)
   // ── React state (drives re-render / UI only) ──
   const [maps, setMaps] = useState([]);
   const [activeMap, setActiveMap] = useState(null);
@@ -474,11 +473,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     // Anneaux et handles de sélection → rendu en CSS (box-shadow) dans le token overlay HTML
     // pour éviter qu'ils soient cachés sous les divs HTML à z-index supérieur
 
-    // ─── Fog unifié : fog MJ peint (80%) + zones explorées (30%) ────────────
-    // Un seul fog : fogCellsRef (peint par le MJ). Les joueurs le révèlent en se déplaçant.
-    // Les zones traversées restent dans exploredCellsRef à 30% pour indiquer qu'elles ont été visitées.
-    const explored = exploredCellsRef.current;
-
+    // ─── Fog simplifié : 2 états uniquement — fogCellsRef (80%) ou rien ─────
     if (dm) {
       // MJ : fog semi-transparent (voit toujours tout) + cercles de vision debug
       if (fc.size > 0) {
@@ -497,22 +492,26 @@ export default function MapCanvas({ sessionId, isDM }) {
           ctx.lineWidth = 1.5 / z; ctx.setLineDash([5 / z, 4 / z]); ctx.stroke(); ctx.setLineDash([]);
         });
       }
-    } else if (gs > 0 && (fc.size > 0 || explored.size > 0)) {
-      // Joueurs : fog MJ à 80%, zones mémorisées à 30%, zones vides → rien
-      const cx0 = Math.floor(wx0 / gs) - 1, cy0 = Math.floor(wy0 / gs) - 1;
-      const cx1 = Math.ceil((wx0 + W) / gs) + 1, cy1 = Math.ceil((wy0 + H) / gs) + 1;
-      for (let cx = cx0; cx <= cx1; cx++) {
-        for (let cy = cy0; cy <= cy1; cy++) {
-          const key = `${cx},${cy}`;
-          if (fc.has(key)) {
-            ctx.fillStyle = 'rgba(0,0,0,0.8)'; // fog MJ — opacité maximale
-            ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
-          } else if (explored.has(key)) {
-            ctx.fillStyle = 'rgba(0,0,0,0.3)'; // zone mémorisée — légèrement assombrie
-            ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
-          }
-          // Zone vide (jamais fogée ou déjà révélée) → rien à dessiner
-        }
+    } else if (gs > 0 && fc.size > 0) {
+      // Joueurs : fog MJ à 80%, limité aux bounds de l'image de la map
+      const img = mapImageRef.current;
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      if (img) {
+        const imgLeft   = imgXRef.current;
+        const imgTop    = imgYRef.current;
+        const imgRight  = imgLeft + img.naturalWidth  * imgScaleRef.current;
+        const imgBottom = imgTop  + img.naturalHeight * imgScaleRef.current;
+        fc.forEach(key => {
+          const [cx, cy] = key.split(',').map(Number);
+          const px = cx * gs, py = cy * gs;
+          if (px >= imgLeft && px < imgRight && py >= imgTop && py < imgBottom)
+            ctx.fillRect(px - 0.5, py - 0.5, gs + 1, gs + 1);
+        });
+      } else {
+        fc.forEach(key => {
+          const [cx, cy] = key.split(',').map(Number);
+          ctx.fillRect(cx * gs - 0.5, cy * gs - 0.5, gs + 1, gs + 1);
+        });
       }
     }
 
@@ -602,25 +601,23 @@ export default function MapCanvas({ sessionId, isDM }) {
   // Redraw on state changes
   useEffect(() => { drawFrame(); }, [tokens, paths, panOffset, zoom, mapImage, imgX, imgY, imgScale, fogCells, gridSize, drawColor, drawWidth, fogColor, fogOpacity, tool, drawFrame]);
 
-  // Révèle le fog MJ dans le radius d'un token joueur — retire les cellules de fogCellsRef
-  // et les marque comme explorées (30% d'opacité). Retourne la liste des cellules retirées.
+  // Révèle le fog MJ dans le radius d'un token joueur — retire les cellules de fogCellsRef.
+  // Cercle parfait : tolérance +0.5 pour inclure les cellules tangentes au bord du rayon.
   const revealFogForToken = (tok) => {
     const gs = gridSizeRef.current;
     if (gs <= 0 || !tok || tok.hidden || tok.type === 'enemy') return [];
     const removed = [];
     const vr = tok.nightVision ? VISION_ENHANCED : VISION_NORMAL;
-    // Centre du token en coordonnées de grille (centré exactement sur le token)
     const tcx = Math.floor(tok.x / gs);
     const tcy = Math.floor(tok.y / gs);
     for (let dx = -vr; dx <= vr; dx++) {
       for (let dy = -vr; dy <= vr; dy++) {
-        if (Math.sqrt(dx * dx + dy * dy) <= vr) {
+        if (Math.sqrt(dx * dx + dy * dy) <= vr + 0.5) {
           const key = `${tcx + dx},${tcy + dy}`;
           if (fogCellsRef.current.has(key)) {
-            fogCellsRef.current.delete(key); // retirer du fog MJ
+            fogCellsRef.current.delete(key);
             removed.push(key);
           }
-          exploredCellsRef.current.add(key); // marquer comme explorée
         }
       }
     }
@@ -737,7 +734,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     // Réception de l'état complet de la map active après (re)connexion.
     // Le serveur envoie cet événement dans join-session pour chaque socket qui rejoint la session.
     // Applique directement les tokens/tracés/fog/grille/image sans reload de page.
-    const onMapSync = ({ mapId, tokens: t, drawings: d, fogCells: fc, gridSize: gs, img_x, img_y, img_scale, exploredCells: ec }) => {
+    const onMapSync = ({ mapId, tokens: t, drawings: d, fogCells: fc, gridSize: gs, img_x, img_y, img_scale }) => {
       if (mapId !== activeMapRef.current?.id) return;
       const toks = Array.isArray(t) ? t : [];
       tokensRef.current = toks; setTokens(toks);
@@ -747,8 +744,6 @@ export default function MapCanvas({ sessionId, isDM }) {
       fogCellsRef.current = cells; setFogCells(cells);
       if (gs) { gridSizeRef.current = gs; setGridSize(gs); }
       if (img_x !== undefined) { setImgX(img_x); setImgY(img_y); setImgScale(img_scale); }
-      // Restaurer les cellules explorées depuis la DB
-      if (Array.isArray(ec)) exploredCellsRef.current = new Set(ec);
       livePathsRef.current = {};
       drawFrame();
     };
@@ -799,9 +794,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     const onMapChanged = ({ map }) => {
       if (!map) return;
       setMaps(prev => prev.map(m => ({ ...m, is_active: m.id === map.id ? 1 : 0 })));
-      // Réinitialiser les cellules explorées avant de charger la nouvelle map
-      exploredCellsRef.current = new Set();
-      setActiveMap(map); loadFog(map); loadImgTransform(map);
+        setActiveMap(map); loadFog(map); loadImgTransform(map);
     };
     const onFogUpdate = ({ mapId, fogCells: cells, gridSize: gs }) => {
       if (mapId !== activeMapRef.current?.id) return;
@@ -862,13 +855,11 @@ export default function MapCanvas({ sessionId, isDM }) {
       mapImageRef.current = null; setMapImage(null); drawFrame();
     };
     // Réception des cellules révélées depuis un autre joueur (pendant son drag)
-    // removedCells : cellules retirées du fog MJ, exploredCells : zones mémorisées complètes
-    const onFogExplored = ({ removedCells, exploredCells: ec }) => {
+    const onFogExplored = ({ removedCells }) => {
       if (Array.isArray(removedCells)) {
         removedCells.forEach(c => fogCellsRef.current.delete(c));
-        setFogCells(new Set(fogCellsRef.current)); // sync React state pour le token overlay
+        setFogCells(new Set(fogCellsRef.current));
       }
-      if (Array.isArray(ec)) ec.forEach(c => exploredCellsRef.current.add(c));
       drawFrame();
     };
 
@@ -947,21 +938,17 @@ export default function MapCanvas({ sessionId, isDM }) {
     const pths = typeof activeMap.drawings === 'string' ? JSON.parse(activeMap.drawings) : (activeMap.drawings || []);
     pathsRef.current = pths; setPaths(pths);
     livePathsRef.current = {};
-    // Réinitialiser les cellules explorées avant de charger la nouvelle map
-    exploredCellsRef.current = new Set();
     loadFog(activeMap); loadImgTransform(activeMap);
   }, [activeMap, drawFrame]);
 
   const loadFog = (map) => {
     try {
       const raw = JSON.parse(map.fog_data || '[]');
-      // Format ancien : tableau simple de cellules. Format nouveau : {cells, gs, explored}
-      const cells    = Array.isArray(raw) ? raw : (raw.cells    || []);
-      const gs       = Array.isArray(raw) ? null : raw.gs;
-      const explored = Array.isArray(raw) ? []   : (raw.explored || []);
+      // Format ancien : tableau simple. Format nouveau : {cells, gs}
+      const cells = Array.isArray(raw) ? raw : (raw.cells || []);
+      const gs    = Array.isArray(raw) ? null : raw.gs;
       const s = new Set(cells);
       fogCellsRef.current = s; setFogCells(s);
-      exploredCellsRef.current = new Set(explored);
       if (gs) { gridSizeRef.current = gs; setGridSize(gs); }
     } catch { fogCellsRef.current = new Set(); setFogCells(new Set()); }
   };
@@ -1226,11 +1213,7 @@ export default function MapCanvas({ sessionId, isDM }) {
             setFogCells(new Set(fogCellsRef.current)); // sync React state pour le token overlay
             drawFrame(); // redessiner pour afficher le fog révélé en temps réel
             if (socket) {
-              socket.emit('map-fog-explored', {
-                sessionId,
-                removedCells: removed,
-                exploredCells: [...exploredCellsRef.current]
-              });
+              socket.emit('map-fog-explored', { sessionId, removedCells: removed });
             }
           }
         }
@@ -1279,14 +1262,13 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (mv) { selectedTokenRef.current = mv; setSelectedToken(mv); }
       setTokens([...tokensRef.current]); // sync React state once after drag (not per-frame)
       if (mv) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: wasDragging.id, x: mv.x, y: mv.y, live: false });
-      // Persister fogCells + exploredCells en DB après le déplacement (fog unifié)
+      // Persister le fog en DB après le déplacement (map-fog-paint = sauvegarde définitive)
       if (activeMapRef.current && !wasDragging.hidden && wasDragging.type !== 'enemy') {
-        socket.emit('map-fog-explored', {
+        socket.emit('map-fog-paint', {
           sessionId,
           mapId: activeMapRef.current.id,
           fogCells: [...fogCellsRef.current],
-          exploredCells: [...exploredCellsRef.current],
-          save: true
+          gridSize: gridSizeRef.current,
         });
       }
     }

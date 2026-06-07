@@ -107,13 +107,11 @@ export function setupSocket(io) {
         if (activeMap) {
           let fogCells = [];
           let gridSize = 40;
-          let exploredCells = [];
           try {
             const raw = JSON.parse(activeMap.fog_data || '[]');
-            // Format ancien : tableau simple. Format nouveau : {cells, gs, explored}
-            fogCells      = Array.isArray(raw) ? raw : (raw.cells    || []);
-            gridSize      = Array.isArray(raw) ? 40  : (raw.gs       || 40);
-            exploredCells = Array.isArray(raw) ? []  : (raw.explored || []);
+            // Format ancien : tableau simple. Format nouveau : {cells, gs}
+            fogCells = Array.isArray(raw) ? raw : (raw.cells || []);
+            gridSize = Array.isArray(raw) ? 40  : (raw.gs    || 40);
           } catch {}
 
           const allMapTokens = JSON.parse(activeMap.tokens || '[]');
@@ -121,15 +119,14 @@ export function setupSocket(io) {
             ? allMapTokens
             : allMapTokens.filter(t => !t.hidden);
           socket.emit('map-sync', {
-            mapId:          activeMap.id,
-            tokens:         syncTokens,
-            drawings:       JSON.parse(activeMap.drawings  || '[]'),
+            mapId:     activeMap.id,
+            tokens:    syncTokens,
+            drawings:  JSON.parse(activeMap.drawings || '[]'),
             fogCells,
             gridSize,
-            exploredCells,
-            img_x:          activeMap.img_x    || 0,
-            img_y:          activeMap.img_y    || 0,
-            img_scale:      activeMap.img_scale || 1.0,
+            img_x:     activeMap.img_x    || 0,
+            img_y:     activeMap.img_y    || 0,
+            img_scale: activeMap.img_scale || 1.0,
           });
         }
       } catch (err) {
@@ -411,40 +408,20 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-fog-live', { mapId, fogCells, gridSize });
     });
 
-    // ---- Fog unifié : cellules révélées par déplacement de token ----
-    // Pendant le drag : relay removedCells + exploredCells aux autres (sans DB)
-    // Après le drag  : save=true → persiste fogCells + exploredCells en DB
+    // ---- Fog simplifié : cellules révélées par déplacement de token ----
+    // Pendant le drag : relay removedCells aux autres (sans DB)
     socket.on('map-fog-explored', (data) => {
-      const { sessionId, mapId, removedCells, exploredCells, fogCells, save } = data;
+      const { sessionId, removedCells } = data;
       if (!isMember(sessionId, socket.user.id)) return;
-      // Relayer aux autres clients (mise à jour temps réel pendant le drag)
-      socket.to(sessionId).emit('map-fog-explored', { removedCells, exploredCells });
-      // Persister l'état complet du fog après un déplacement (save=true)
-      if (save && mapId) {
-        try {
-          const map = db.prepare('SELECT fog_data FROM maps WHERE id = ?').get(mapId);
-          const raw = JSON.parse(map?.fog_data || '{}');
-          const currentGs = Array.isArray(raw) ? 40 : (raw.gs || 40);
-          const fogData = {
-            cells:    fogCells    || (Array.isArray(raw) ? raw : (raw.cells || [])),
-            gs:       currentGs,
-            explored: exploredCells || [],
-          };
-          db.prepare('UPDATE maps SET fog_data = ? WHERE id = ?').run(JSON.stringify(fogData), mapId);
-        } catch (err) { console.error('DB fog-explored error:', err); }
-      }
+      socket.to(sessionId).emit('map-fog-explored', { removedCells });
     });
 
-    // ---- Fog of war : peinture manuelle MJ (sauvegarde finale) ----
+    // ---- Fog of war : peinture MJ ou persistance post-drag (sauvegarde en DB) ----
     socket.on('map-fog-paint', (data) => {
       const { sessionId, mapId, fogCells, gridSize } = data;
-      if (!isDM(sessionId, socket.user.id)) return;
+      if (!isMember(sessionId, socket.user.id)) return;
       try {
-        // Conserver les cellules explorées existantes lors d'une mise à jour du fog MJ
-        const map = db.prepare('SELECT fog_data FROM maps WHERE id = ?').get(mapId);
-        const raw = JSON.parse(map?.fog_data || '{}');
-        const explored = Array.isArray(raw) ? [] : (raw.explored || []);
-        const fogData = JSON.stringify({ cells: fogCells || [], gs: gridSize || 40, explored });
+        const fogData = JSON.stringify({ cells: fogCells || [], gs: gridSize || 40 });
         db.prepare('UPDATE maps SET fog_data = ? WHERE id = ?').run(fogData, mapId);
       } catch {}
       socket.to(sessionId).emit('map-fog-update', { mapId, fogCells, gridSize });
