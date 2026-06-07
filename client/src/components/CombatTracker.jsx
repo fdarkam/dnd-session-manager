@@ -273,13 +273,11 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
-  // Bouton + : applique la valeur absolue en positif (soins)
   const applyPositive = (entityId) => {
     const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
     if (abs > 0) applyHPDelta(entityId, abs);
   };
 
-  // Bouton − : applique la valeur absolue en négatif (dégâts)
   const applyNegative = (entityId) => {
     const abs = Math.abs(parseInt(hpDeltas[entityId] || '') || 0);
     if (abs > 0) applyHPDelta(entityId, -abs);
@@ -445,190 +443,181 @@ export default function CombatTracker({ sessionId, isDM }) {
             const flash = hpFlash[entity.id];
             const canEdit = canEditEntity(entity);
 
+            /*
+              Fix layout — chaque entité est désormais une colonne (flex-direction: column).
+              Ligne 1 : nom (gauche) + boutons ✦ ✕ (droite)
+              Ligne 2 : barre HP + texte PV + CA + emoji + initiative
+              Ligne 3 : pill group [ input ][ + ][ − ] si le joueur peut éditer
+              Ligne 4 : badges de statuts
+            */
             return (
               <div
                 key={entity.id}
                 className={`initiative-row ${isActive ? 'active' : ''}`}
-                style={{ marginBottom: '6px', flexWrap: 'wrap', alignItems: 'flex-start' }}
+                style={{
+                  marginBottom: '8px',
+                  flexDirection: 'column',
+                  alignItems: 'stretch',
+                  gap: '4px',
+                }}
               >
-                <div className="turn-indicator" style={{ marginTop: '4px' }} />
-                <span style={{
-                  fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-primary)',
-                  minWidth: '28px', textAlign: 'center', marginTop: '2px',
-                }}>
-                  {entity.initiative}
-                </span>
-                <span style={{ fontSize: '1rem', marginTop: '2px' }}>
-                  {entity.type === 'enemy' ? '💀' : '🛡️'}
-                </span>
-
-                {/* Nom + zone PV + statuts */}
-                <div style={{ flex: 1, minWidth: '80px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{entity.name}</div>
-
-                  {/*
-                    Fix layout — Ligne PV structurée en deux niveaux :
-                    1. Conteneur principal (flex, wrap) : barre HP à gauche, puis groupe [PV+input] à droite
-                    2. Groupe [PV+input] en nowrap pour que le texte et le pill group ne se séparent jamais
-                  */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-
-                    {/* Barre HP — peut passer à la ligne si la fenêtre est très étroite */}
-                    <div className="hp-bar-container" style={{ width: '60px', height: '5px', flexShrink: 0 }}>
-                      <div
-                        className={`hp-bar ${hpClass}`}
-                        style={{ width: `${Math.min(100, Math.max(0, hpPct))}%` }}
-                      />
-                    </div>
-
-                    {/*
-                      Groupe solidaire PV + input : flexWrap nowrap + flexShrink 0
-                      garantit que "23/23 PV [input][+][−]" reste toujours sur une seule ligne
-                    */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap', flexShrink: 0 }}>
-
-                      {/* Texte PV + flash */}
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        {entity.hp}/{hpMax} PV
-                        {flash && (
-                          <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
-                            {flash.text}
-                          </span>
-                        )}
-                      </span>
-
-                      {/* CA */}
-                      {entity.ac != null && (
-                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                          🛡 {entity.ac}
-                        </span>
-                      )}
-
-                      {/*
-                        Fix layout — Pill group input + boutons :
-                        - gap: 0 et bordures partagées donnent un rendu "composant unique"
-                        - border-radius seulement sur les coins extérieurs (gauche de l'input, droite du bouton −)
-                        - flexShrink: 0 empêche le groupe de se comprimer
-                      */}
-                      {canEdit && (
-                        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                          <input
-                            type="text"
-                            value={hpDeltas[entity.id] || ''}
-                            onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
-                            onKeyDown={e => handleHpKeyDown(entity.id, e)}
-                            placeholder="PV"
-                            title="Tapez un nombre · − dégâts · + soins · Entrée valider"
-                            style={{
-                              width: '48px',
-                              height: '26px',
-                              boxSizing: 'border-box',
-                              border: '1px solid var(--border-color)',
-                              borderRight: 'none',
-                              borderRadius: '4px 0 0 4px',
-                              textAlign: 'center',
-                              fontSize: '0.72rem',
-                              padding: '0 4px',
-                              background: 'var(--bg-secondary)',
-                              color: 'var(--text-primary)',
-                              outline: 'none',
-                            }}
-                          />
-                          {/* Bouton + : arrondi aucun (milieu du pill group) */}
-                          <button
-                            onClick={() => applyPositive(entity.id)}
-                            title="Soins"
-                            style={{
-                              width: '28px',
-                              height: '26px',
-                              boxSizing: 'border-box',
-                              border: '1px solid var(--border-color)',
-                              borderRight: 'none',
-                              borderRadius: 0,
-                              background: 'rgba(34,197,94,0.13)',
-                              color: '#22c55e',
-                              fontWeight: 700,
-                              fontSize: '0.85rem',
-                              lineHeight: 1,
-                              cursor: 'pointer',
-                              padding: 0,
-                              flexShrink: 0,
-                            }}
-                          >
-                            +
-                          </button>
-                          {/* Bouton − : arrondi uniquement à droite (fin du pill group) */}
-                          <button
-                            onClick={() => applyNegative(entity.id)}
-                            title="Dégâts"
-                            style={{
-                              width: '28px',
-                              height: '26px',
-                              boxSizing: 'border-box',
-                              border: '1px solid var(--border-color)',
-                              borderRadius: '0 4px 4px 0',
-                              background: 'rgba(248,113,113,0.13)',
-                              color: '#f87171',
-                              fontWeight: 700,
-                              fontSize: '0.85rem',
-                              lineHeight: 1,
-                              cursor: 'pointer',
-                              padding: 0,
-                              flexShrink: 0,
-                            }}
-                          >
-                            −
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                {/* Ligne 1 — nom à gauche, boutons ✦ et ✕ à droite */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+                    <div className="turn-indicator" />
+                    <span style={{
+                      fontWeight: 600, fontSize: '0.88rem',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {entity.name}
+                    </span>
                   </div>
-
-                  {/* Badges statuts actifs — cliquer pour retirer */}
-                  {statuses.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
-                      {statuses.map(s => {
-                        const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
-                        return (
-                          <span
-                            key={s}
-                            onClick={() => toggleStatus(entity.id, s)}
-                            title={`Retirer : ${s}`}
-                            style={{
-                              fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, cursor: 'pointer',
-                              background: sc.bg, color: sc.color, border: `1px solid ${sc.color}44`,
-                              userSelect: 'none',
-                            }}
-                          >
-                            {s} ✕
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    <button
+                      data-status-picker
+                      className="btn btn-secondary btn-sm"
+                      onClick={(e) => openStatusPicker(entity.id, e)}
+                      title="Gérer les statuts"
+                      style={{ padding: '3px 7px', fontSize: '0.75rem' }}
+                    >
+                      ✦
+                    </button>
+                    {canEdit && (
+                      <button
+                        className="btn-icon"
+                        onClick={() => removeEntity(entity.id)}
+                        title="Retirer du combat"
+                        style={{ fontSize: '0.8rem' }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* Bouton sélecteur de statut (position:fixed pour ne pas être clippé) */}
-                <button
-                  data-status-picker
-                  className="btn btn-secondary btn-sm"
-                  onClick={(e) => openStatusPicker(entity.id, e)}
-                  title="Gérer les statuts"
-                  style={{ padding: '3px 7px', fontSize: '0.75rem', flexShrink: 0 }}
-                >
-                  ✦
-                </button>
+                {/* Ligne 2 — barre HP + texte PV + CA + type + initiative */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <div className="hp-bar-container" style={{ width: '60px', height: '5px', flexShrink: 0 }}>
+                    <div
+                      className={`hp-bar ${hpClass}`}
+                      style={{ width: `${Math.min(100, Math.max(0, hpPct))}%` }}
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {entity.hp}/{hpMax} PV
+                    {/* Flash vert (soins) ou rouge (dégâts) après application */}
+                    {flash && (
+                      <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
+                        {flash.text}
+                      </span>
+                    )}
+                  </span>
+                  {entity.ac != null && (
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      🛡 {entity.ac}
+                    </span>
+                  )}
+                  <span style={{ fontSize: '0.72rem', color: 'var(--accent-primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    {entity.type === 'enemy' ? '💀' : '🛡️'} {entity.initiative}
+                  </span>
+                </div>
 
-                {/* Bouton retirer — fin de ligne, visible si le joueur peut éditer */}
+                {/*
+                  Ligne 3 — Pill group [ input ][ + ][ − ] aligné à gauche
+                  Visible en permanence si le joueur peut éditer l'entité
+                  Même style pill group que précédemment (bordures partagées, coins arrondis extérieurs)
+                */}
                 {canEdit && (
-                  <button
-                    className="btn-icon"
-                    onClick={() => removeEntity(entity.id)}
-                    title="Retirer du combat"
-                    style={{ fontSize: '0.8rem', flexShrink: 0 }}
-                  >
-                    ✕
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={hpDeltas[entity.id] || ''}
+                      onChange={e => setHpDeltas(prev => ({ ...prev, [entity.id]: e.target.value }))}
+                      onKeyDown={e => handleHpKeyDown(entity.id, e)}
+                      placeholder="PV"
+                      title="Tapez un nombre · − dégâts · + soins · Entrée valider"
+                      style={{
+                        width: '48px',
+                        height: '26px',
+                        boxSizing: 'border-box',
+                        border: '1px solid var(--border-color)',
+                        borderRight: 'none',
+                        borderRadius: '4px 0 0 4px',
+                        textAlign: 'center',
+                        fontSize: '0.72rem',
+                        padding: '0 4px',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={() => applyPositive(entity.id)}
+                      title="Soins"
+                      style={{
+                        width: '28px',
+                        height: '26px',
+                        boxSizing: 'border-box',
+                        border: '1px solid var(--border-color)',
+                        borderRight: 'none',
+                        borderRadius: 0,
+                        background: 'rgba(34,197,94,0.13)',
+                        color: '#22c55e',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        lineHeight: 1,
+                        cursor: 'pointer',
+                        padding: 0,
+                        flexShrink: 0,
+                      }}
+                    >
+                      +
+                    </button>
+                    <button
+                      onClick={() => applyNegative(entity.id)}
+                      title="Dégâts"
+                      style={{
+                        width: '28px',
+                        height: '26px',
+                        boxSizing: 'border-box',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '0 4px 4px 0',
+                        background: 'rgba(248,113,113,0.13)',
+                        color: '#f87171',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        lineHeight: 1,
+                        cursor: 'pointer',
+                        padding: 0,
+                        flexShrink: 0,
+                      }}
+                    >
+                      −
+                    </button>
+                  </div>
+                )}
+
+                {/* Ligne 4 — badges statuts actifs, cliquer pour retirer */}
+                {statuses.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                    {statuses.map(s => {
+                      const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
+                      return (
+                        <span
+                          key={s}
+                          onClick={() => toggleStatus(entity.id, s)}
+                          title={`Retirer : ${s}`}
+                          style={{
+                            fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, cursor: 'pointer',
+                            background: sc.bg, color: sc.color, border: `1px solid ${sc.color}44`,
+                            userSelect: 'none',
+                          }}
+                        >
+                          {s} ✕
+                        </span>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             );
