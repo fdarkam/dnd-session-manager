@@ -107,10 +107,15 @@ export function setupSocket(io) {
         if (activeMap) {
           let fogCells = [];
           let gridSize = 40;
+          let exploredCells = [];
+          let autoFogEnabled = false;
           try {
             const raw = JSON.parse(activeMap.fog_data || '[]');
-            fogCells = Array.isArray(raw) ? raw : (raw.cells || []);
-            gridSize = Array.isArray(raw) ? 40 : (raw.gs || 40);
+            fogCells      = Array.isArray(raw) ? raw           : (raw.cells    || []);
+            gridSize      = Array.isArray(raw) ? 40            : (raw.gs       || 40);
+            // Champs fog automatique (format étendu : {cells, gs, explored, autoFog})
+            exploredCells = Array.isArray(raw) ? []            : (raw.explored || []);
+            autoFogEnabled = Array.isArray(raw) ? false        : (raw.autoFog  || false);
           } catch {}
 
           const allMapTokens = JSON.parse(activeMap.tokens || '[]');
@@ -118,14 +123,16 @@ export function setupSocket(io) {
             ? allMapTokens
             : allMapTokens.filter(t => !t.hidden);
           socket.emit('map-sync', {
-            mapId:    activeMap.id,
-            tokens:   syncTokens,
-            drawings: JSON.parse(activeMap.drawings  || '[]'),
+            mapId:          activeMap.id,
+            tokens:         syncTokens,
+            drawings:       JSON.parse(activeMap.drawings  || '[]'),
             fogCells,
             gridSize,
-            img_x:     activeMap.img_x    || 0,
-            img_y:     activeMap.img_y    || 0,
-            img_scale: activeMap.img_scale || 1.0,
+            exploredCells,
+            autoFogEnabled,
+            img_x:          activeMap.img_x    || 0,
+            img_y:          activeMap.img_y    || 0,
+            img_scale:      activeMap.img_scale || 1.0,
           });
         }
       } catch (err) {
@@ -405,6 +412,45 @@ export function setupSocket(io) {
       const { sessionId, mapId, fogCells, gridSize } = data;
       if (!isDM(sessionId, socket.user.id)) return;
       socket.to(sessionId).emit('map-fog-live', { mapId, fogCells, gridSize });
+    });
+
+    // ---- Fog automatique : cellules explorées/visibles (pendant et après drag) ----
+    // save=true → persiste exploredCells dans fog_data en DB
+    socket.on('map-fog-explored', (data) => {
+      const { sessionId, mapId, exploredCells, visibleCells, save } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
+      // Relayer aux autres clients pour qu'ils mettent à jour leur vue
+      socket.to(sessionId).emit('map-fog-explored', { exploredCells, visibleCells });
+      // Persister les cellules explorées après un déplacement de token (save=true)
+      if (save && mapId) {
+        try {
+          const map = db.prepare('SELECT fog_data FROM maps WHERE id = ?').get(mapId);
+          const raw = JSON.parse(map?.fog_data || '{}');
+          const fogData = Array.isArray(raw)
+            ? { cells: raw, gs: 40, explored: exploredCells || [], autoFog: false }
+            : { ...raw, explored: exploredCells || [] };
+          db.prepare('UPDATE maps SET fog_data = ? WHERE id = ?').run(JSON.stringify(fogData), mapId);
+        } catch (err) { console.error('DB fog-explored error:', err); }
+      }
+    });
+
+    // ---- Fog automatique : activation/désactivation (MJ uniquement) ----
+    socket.on('map-auto-fog', (data) => {
+      const { sessionId, mapId, enabled } = data;
+      if (!isDM(sessionId, socket.user.id)) return;
+      // Persister l'état dans fog_data
+      if (mapId) {
+        try {
+          const map = db.prepare('SELECT fog_data FROM maps WHERE id = ?').get(mapId);
+          const raw = JSON.parse(map?.fog_data || '{}');
+          const fogData = Array.isArray(raw)
+            ? { cells: raw, gs: 40, explored: [], autoFog: enabled }
+            : { ...raw, autoFog: enabled };
+          db.prepare('UPDATE maps SET fog_data = ? WHERE id = ?').run(JSON.stringify(fogData), mapId);
+        } catch (err) { console.error('DB auto-fog error:', err); }
+      }
+      // Broadcaster à tous les clients de la session (y compris le MJ émetteur)
+      io.to(sessionId).emit('map-auto-fog-updated', { enabled });
     });
 
     // ---- Fog of war : sauvegarde finale ----
