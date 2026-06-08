@@ -44,6 +44,16 @@ const CONDITIONS = [
   { id: 'dead',         label: 'Mort',        emoji: '💀', color: '#c0392b' },
 ];
 
+// ─── Position de la poignée de redimensionnement d'une forme ────────────────
+// Cercle → bord droit ; rectangle/ligne/cône → point x2/y2
+function getShapeResizeHandle(shape) {
+  if (shape.type === 'circle') {
+    const r = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+    return { x: shape.x + r, y: shape.y };
+  }
+  return { x: shape.x2, y: shape.y2 };
+}
+
 // ─── Test de sélection d'une forme de sort ──────────────────────────────────
 function hitTestShape(shape, pos, threshold) {
   const { type, x, y, x2, y2, filled, width } = shape;
@@ -424,9 +434,10 @@ export default function MapCanvas({ sessionId, isDM }) {
   const currentShapeRef = useRef(null); // forme en cours de dessin (preview live)
   const selectedShapeRef = useRef(null); // forme actuellement sélectionnée
   const isDrawingShapeRef = useRef(false);
-  const isDraggingShapeRef = useRef(null);           // Fix 2 — drag d'une forme sélectionnée
-  const lastShapeDragEmit = useRef(0);               // Fix 2 — throttle broadcast drag forme
-  const shapeLastClickRef = useRef({ id: null, time: 0 }); // Fix 5 — détection double clic
+  const isDraggingShapeRef = useRef(null);           // drag d'une forme sélectionnée
+  const isResizingShapeRef = useRef(false);          // Fix 1 — redimensionnement d'une forme
+  const lastShapeDragEmit = useRef(0);               // throttle broadcast drag/resize forme
+  const shapeLastClickRef = useRef({ id: null, time: 0 }); // détection double clic
   const shapeTypeRef = useRef('circle');
   const shapeColorRef = useRef('#e74c3c');
   const shapeWidthRef = useRef(2);
@@ -729,8 +740,16 @@ export default function MapCanvas({ sessionId, isDM }) {
           }
         }
         ctx.setLineDash([]);
+        // Fix 1 — poignée de redimensionnement : petit carré blanc sur le bord actif
+        const handle = getShapeResizeHandle(shape);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1 / z;
+        ctx.fillRect(handle.x - 5 / z, handle.y - 5 / z, 10 / z, 10 / z);
+        ctx.strokeRect(handle.x - 5 / z, handle.y - 5 / z, 10 / z, 10 / z);
       }
-      // Fix 4 — nom de la forme affiché sous son centre
+      // nom de la forme affiché sous son centre
       if (shape.name) {
         let nameX, nameY;
         switch (shape.type) {
@@ -1485,7 +1504,17 @@ export default function MapCanvas({ sessionId, isDM }) {
         if (canManage) { saveUndoState(); isDraggingRef.current = clicked; setDragging(clicked); }
         return;
       }
-      // Fix 2 & 5 — clic/double clic sur une forme : sélection, drag, renommage
+      // Fix 1 — poignée de resize de la forme sélectionnée : priorité avant drag et clic
+      const selShape = selectedShapeRef.current;
+      if (selShape) {
+        const handle = getShapeResizeHandle(selShape);
+        const hdx = pos.x - handle.x, hdy = pos.y - handle.y;
+        if (hdx * hdx + hdy * hdy <= (10 / zoomRef.current) ** 2) {
+          isResizingShapeRef.current = true;
+          return;
+        }
+      }
+      // clic/double clic sur une forme : sélection, drag, renommage
       const clickedShape = shapesRef.current.find(s => hitTestShape(s, pos, 12 / zoomRef.current));
       if (clickedShape) {
         const nowMs = Date.now();
@@ -1588,7 +1617,21 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (socket && now - lastDragEmit.current > 16) { lastDragEmit.current = now; socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: t.id, radius: newR, live: true }); }
       return;
     }
-    // Fix 2 — déplacement d'une forme sélectionnée (throttle ~60fps)
+    // Fix 1 — redimensionnement d'une forme : x2/y2 suit la souris en temps réel
+    if (isResizingShapeRef.current && selectedShapeRef.current) {
+      const shape = selectedShapeRef.current;
+      const updated = { ...shape, x2: pos.x, y2: pos.y };
+      const next = shapesRef.current.map(s => s.id === shape.id ? updated : s);
+      shapesRef.current = next;
+      selectedShapeRef.current = updated;
+      drawFrame();
+      if (socket && now - lastShapeDragEmit.current > 16) {
+        lastShapeDragEmit.current = now;
+        if (activeMapRef.current) socket.emit('map-shape-update', { sessionId, mapId: activeMapRef.current.id, shape: updated, live: true });
+      }
+      return;
+    }
+    // déplacement d'une forme sélectionnée (throttle ~60fps)
     if (isDraggingShapeRef.current) {
       const { shape, startX, startY, origX, origY, origX2, origY2 } = isDraggingShapeRef.current;
       const dx = pos.x - startX, dy = pos.y - startY;
@@ -1685,7 +1728,19 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (socket && activeMapRef.current) socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: Array.from(fogCellsRef.current), gridSize: gridSizeRef.current });
     }
     eraserActive.current = false;
-    // Fix 2 — fin du drag d'une forme : sync React state + emit final (DB write côté serveur)
+    // Fix 1 — fin du resize d'une forme : sync React state + emit final
+    if (isResizingShapeRef.current) {
+      isResizingShapeRef.current = false;
+      const shape = selectedShapeRef.current;
+      setShapes([...shapesRef.current]);
+      if (shape) {
+        setSelectedShape(shape);
+        if (socket && activeMapRef.current)
+          socket.emit('map-shape-update', { sessionId, mapId: activeMapRef.current.id, shape, live: false });
+      }
+      drawFrame();
+    }
+    // fin du drag d'une forme : sync React state + emit final (DB write côté serveur)
     if (isDraggingShapeRef.current) {
       const updatedShape = selectedShapeRef.current;
       isDraggingShapeRef.current = null;
@@ -1854,7 +1909,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     if (tool === 'draw' || tool === 'shape') return 'crosshair';
     if (tool === 'token') return 'copy';
     if (tool === 'map-edit') { if (!editingMapImg) return 'default'; if (editingMapImg.type === 'move') return 'grabbing'; return ['nw','se'].includes(editingMapImg.type) ? 'nwse-resize' : 'nesw-resize'; }
-    if (resizingToken.current) return 'nwse-resize';
+    if (resizingToken.current || isResizingShapeRef.current) return 'nwse-resize';
     if (dragging) return 'grabbing';
     return 'grab';
   };
@@ -1926,13 +1981,17 @@ export default function MapCanvas({ sessionId, isDM }) {
               style={{ width: '55px', cursor: 'pointer' }} />
           </div>
         )}
-        {/* Fix 3 — toolbar contextuelle quand une forme est sélectionnée */}
+        {/* toolbar contextuelle quand une forme est sélectionnée */}
         {selectedShape ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span style={{ color: '#aaa', fontSize: '12px', flexShrink: 0, maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              title={selectedShape.name || 'Sans nom'}>
-              {selectedShape.name || 'Sans nom'}
-            </span>
+            {/* Fix 2 — nom éditable directement dans la toolbar (sync temps réel via socket) */}
+            <input
+              type="text"
+              placeholder="Nom du sort..."
+              value={selectedShape.name || ''}
+              onChange={e => updateSelectedShape({ name: e.target.value })}
+              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid #555', borderRadius: '4px', color: 'white', padding: '3px 8px', fontSize: '12px', width: '120px' }}
+            />
             <input type="color" value={selectedShape.color}
               onChange={e => updateSelectedShape({ color: e.target.value })}
               style={{ width: '24px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
