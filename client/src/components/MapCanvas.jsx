@@ -283,6 +283,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const socket = useSocket();
   const { token, user } = useAuth();
   const canvasRef = useRef(null);
+  const cursorCanvasRef = useRef(null); // Canvas dédié aux curseurs — positionné après les tokens dans le DOM
   const containerRef = useRef(null);
 
   // ── Operation flags ──
@@ -578,26 +579,40 @@ export default function MapCanvas({ sessionId, isDM }) {
     });
     if (pingAnimRef.current.length > 0) requestAnimationFrame(drawFrame);
 
-    // Curseurs des autres joueurs — EN DERNIER, au-dessus de tout (fog, tokens, pings)
-    Object.values(otherCursorsRef.current).forEach(c => {
-      const vis = cursorVisualsRef.current[c.userId];
-      const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
-      // Curseur du MJ invisible pour les joueurs — les joueurs ne savent pas où regarde le MJ
-      if (!dm && c.isDM) return;
-      // Players cannot see cursors hidden behind fog
-      if (!dm) {
-        const cellKey = `${Math.floor(cx / gs)},${Math.floor(cy / gs)}`;
-        if (fc.has(cellKey)) return;
-      }
-      const col = userColor(c.userId);
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + 12 / z, cy + 4 / z); ctx.lineTo(cx + 4 / z, cy + 12 / z); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.5 / z; ctx.stroke();
-      ctx.fillStyle = col; ctx.font = `bold ${9 / z}px Inter,sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(c.username, cx + 14 / z, cy + 4 / z);
-    });
-
     ctx.restore();
+
+    // Curseurs — dessinés sur un canvas dédié (cursorCanvasRef) positionné APRÈS les tokens dans le DOM.
+    // Ce canvas a un z-index supérieur aux tokens HTML : les curseurs apparaissent toujours au-dessus.
+    // Dessiner les curseurs sur le canvas principal ne fonctionnerait pas car les divs token HTML
+    // sont dans une couche DOM supérieure, indépendamment de l'ordre dans drawFrame().
+    const cc = cursorCanvasRef.current;
+    if (cc) {
+      if (cc.width !== canvas.width) cc.width = canvas.width;
+      if (cc.height !== canvas.height) cc.height = canvas.height;
+      const cCtx = cc.getContext('2d');
+      cCtx.clearRect(0, 0, cc.width, cc.height);
+      cCtx.save();
+      cCtx.translate(pan.x, pan.y);
+      cCtx.scale(z, z);
+      Object.values(otherCursorsRef.current).forEach(c => {
+        const vis = cursorVisualsRef.current[c.userId];
+        const cx = vis?.x ?? c.x, cy = vis?.y ?? c.y;
+        // Curseur du MJ invisible pour les joueurs — les joueurs ne savent pas où regarde le MJ
+        if (!dm && c.isDM) return;
+        // Curseurs cachés dans le fog pour les joueurs
+        if (!dm) {
+          const cellKey = `${Math.floor(cx / gs)},${Math.floor(cy / gs)}`;
+          if (fc.has(cellKey)) return;
+        }
+        const col = userColor(c.userId);
+        cCtx.fillStyle = col;
+        cCtx.beginPath(); cCtx.moveTo(cx, cy); cCtx.lineTo(cx + 12 / z, cy + 4 / z); cCtx.lineTo(cx + 4 / z, cy + 12 / z); cCtx.closePath(); cCtx.fill();
+        cCtx.strokeStyle = 'rgba(0,0,0,0.5)'; cCtx.lineWidth = 0.5 / z; cCtx.stroke();
+        cCtx.fillStyle = col; cCtx.font = `bold ${9 / z}px Inter,sans-serif`; cCtx.textAlign = 'left'; cCtx.textBaseline = 'top';
+        cCtx.fillText(c.username, cx + 14 / z, cy + 4 / z);
+      });
+      cCtx.restore();
+    }
   }, []); // ← empty deps: all data comes from refs
 
   // ─── Token interpolation loop ─────────────────────────────────────────────
@@ -1711,6 +1726,12 @@ export default function MapCanvas({ sessionId, isDM }) {
             })}
           </div>
         </div>
+        {/* Canvas curseurs — positionné APRÈS l'overlay token dans le DOM = z-index supérieur aux tokens */}
+        {/* pointerEvents:none → les clics continuent de passer au canvas principal */}
+        <canvas
+          ref={cursorCanvasRef}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}
+        />
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
         {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} />}
