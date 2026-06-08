@@ -44,14 +44,50 @@ const CONDITIONS = [
   { id: 'dead',         label: 'Mort',        emoji: '💀', color: '#c0392b' },
 ];
 
-// ─── Position de la poignée de redimensionnement d'une forme ────────────────
-// Cercle → bord droit ; rectangle/ligne/cône → point x2/y2
-function getShapeResizeHandle(shape) {
-  if (shape.type === 'circle') {
-    const r = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
-    return { x: shape.x + r, y: shape.y };
+// ─── Poignées de redimensionnement par type de forme ────────────────────────
+
+// Retourne les poignées fixes pour rectangle (4 coins), ligne et cône (2 bouts).
+// Le cercle n'a pas de poignée fixe : son contour entier est draggable (voir isOnCircleEdge).
+function getHandlesForShape(shape) {
+  switch (shape.type) {
+    case 'rectangle':
+      return [
+        { id: 'tl', x: shape.x,  y: shape.y  },  // haut-gauche
+        { id: 'tr', x: shape.x2, y: shape.y  },  // haut-droite
+        { id: 'bl', x: shape.x,  y: shape.y2 },  // bas-gauche
+        { id: 'br', x: shape.x2, y: shape.y2 },  // bas-droite
+      ];
+    case 'line':
+      return [
+        { id: 'start', x: shape.x,  y: shape.y  },
+        { id: 'end',   x: shape.x2, y: shape.y2 },
+      ];
+    case 'cone':
+      return [
+        { id: 'origin', x: shape.x,  y: shape.y  },
+        { id: 'tip',    x: shape.x2, y: shape.y2 },
+      ];
+    default: return []; // cercle : pas de poignée fixe
   }
-  return { x: shape.x2, y: shape.y2 };
+}
+
+// Cercle : vrai si le curseur est à moins de `threshold` px du contour
+function isOnCircleEdge(shape, pos, threshold) {
+  const dist = Math.hypot(pos.x - shape.x, pos.y - shape.y);
+  const radius = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+  return Math.abs(dist - radius) < threshold;
+}
+
+// Retourne la poignée cliquée ou null (cercle → { id:'edge' } si bord touché)
+function getClickedHandle(shape, pos, threshold) {
+  if (shape.type === 'circle') {
+    return isOnCircleEdge(shape, pos, threshold) ? { id: 'edge' } : null;
+  }
+  const handles = getHandlesForShape(shape);
+  return handles.find(h => {
+    const dx = pos.x - h.x, dy = pos.y - h.y;
+    return dx * dx + dy * dy <= threshold * threshold;
+  }) || null;
 }
 
 // ─── Test de sélection d'une forme de sort ──────────────────────────────────
@@ -435,7 +471,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const selectedShapeRef = useRef(null); // forme actuellement sélectionnée
   const isDrawingShapeRef = useRef(false);
   const isDraggingShapeRef = useRef(null);           // drag d'une forme sélectionnée
-  const isResizingShapeRef = useRef(false);          // Fix 1 — redimensionnement d'une forme
+  const isResizingShapeRef = useRef(false);          // redimensionnement d'une forme en cours
+  const activeHandleRef = useRef(null);              // poignée de resize active { id: ... }
   const lastShapeDragEmit = useRef(0);               // throttle broadcast drag/resize forme
   const shapeLastClickRef = useRef({ id: null, time: 0 }); // détection double clic
   const shapeTypeRef = useRef('circle');
@@ -740,14 +777,29 @@ export default function MapCanvas({ sessionId, isDM }) {
           }
         }
         ctx.setLineDash([]);
-        // Fix 1 — poignée de redimensionnement : petit carré blanc sur le bord actif
-        const handle = getShapeResizeHandle(shape);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 1 / z;
-        ctx.fillRect(handle.x - 5 / z, handle.y - 5 / z, 10 / z, 10 / z);
-        ctx.strokeRect(handle.x - 5 / z, handle.y - 5 / z, 10 / z, 10 / z);
+        // Poignées de resize — cercles blancs sur chaque point de contrôle
+        const handles = getHandlesForShape(shape);
+        handles.forEach(h => {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = 'white';
+          ctx.strokeStyle = '#333';
+          ctx.lineWidth = 1 / z;
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, 5 / z, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+        });
+        // Cercle — anneau pointillé blanc sur le contour pour signaler qu'il est draggable
+        if (shape.type === 'circle') {
+          const r = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = 'white';
+          ctx.lineWidth = 1 / z;
+          ctx.setLineDash([4 / z, 4 / z]);
+          ctx.beginPath();
+          ctx.arc(shape.x, shape.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
       // nom de la forme affiché sous son centre
       if (shape.name) {
@@ -1504,12 +1556,12 @@ export default function MapCanvas({ sessionId, isDM }) {
         if (canManage) { saveUndoState(); isDraggingRef.current = clicked; setDragging(clicked); }
         return;
       }
-      // Fix 1 — poignée de resize de la forme sélectionnée : priorité avant drag et clic
+      // Poignées de resize de la forme sélectionnée : priorité avant drag et clic
       const selShape = selectedShapeRef.current;
       if (selShape) {
-        const handle = getShapeResizeHandle(selShape);
-        const hdx = pos.x - handle.x, hdy = pos.y - handle.y;
-        if (hdx * hdx + hdy * hdy <= (10 / zoomRef.current) ** 2) {
+        const clickedHandle = getClickedHandle(selShape, pos, 10 / zoomRef.current);
+        if (clickedHandle) {
+          activeHandleRef.current = clickedHandle;
           isResizingShapeRef.current = true;
           return;
         }
@@ -1617,10 +1669,27 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (socket && now - lastDragEmit.current > 16) { lastDragEmit.current = now; socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: t.id, radius: newR, live: true }); }
       return;
     }
-    // Fix 1 — redimensionnement d'une forme : x2/y2 suit la souris en temps réel
+    // Redimensionnement d'une forme selon la poignée active
     if (isResizingShapeRef.current && selectedShapeRef.current) {
       const shape = selectedShapeRef.current;
-      const updated = { ...shape, x2: pos.x, y2: pos.y };
+      const handle = activeHandleRef.current;
+      const updated = { ...shape };
+      switch (shape.type) {
+        case 'circle':
+          // Cercle : x2/y2 pointe vers la souris → rayon = distance centre-souris
+          updated.x2 = pos.x; updated.y2 = pos.y; break;
+        case 'rectangle':
+          if (handle.id === 'tl') { updated.x = pos.x;  updated.y = pos.y;  }
+          if (handle.id === 'tr') { updated.x2 = pos.x; updated.y = pos.y;  }
+          if (handle.id === 'bl') { updated.x = pos.x;  updated.y2 = pos.y; }
+          if (handle.id === 'br') { updated.x2 = pos.x; updated.y2 = pos.y; }
+          break;
+        case 'line':
+        case 'cone':
+          if (handle.id === 'start' || handle.id === 'origin') { updated.x = pos.x;  updated.y = pos.y;  }
+          if (handle.id === 'end'   || handle.id === 'tip')    { updated.x2 = pos.x; updated.y2 = pos.y; }
+          break;
+      }
       const next = shapesRef.current.map(s => s.id === shape.id ? updated : s);
       shapesRef.current = next;
       selectedShapeRef.current = updated;
@@ -1728,9 +1797,10 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (socket && activeMapRef.current) socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: Array.from(fogCellsRef.current), gridSize: gridSizeRef.current });
     }
     eraserActive.current = false;
-    // Fix 1 — fin du resize d'une forme : sync React state + emit final
+    // Fin du resize d'une forme : reset des refs + sync React state + emit final
     if (isResizingShapeRef.current) {
       isResizingShapeRef.current = false;
+      activeHandleRef.current = null;
       const shape = selectedShapeRef.current;
       setShapes([...shapesRef.current]);
       if (shape) {
