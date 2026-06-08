@@ -122,6 +122,7 @@ export function setupSocket(io) {
             mapId:     activeMap.id,
             tokens:    syncTokens,
             drawings:  JSON.parse(activeMap.drawings || '[]'),
+            shapes:    JSON.parse(activeMap.shapes   || '[]'),
             fogCells,
             gridSize,
             img_x:     activeMap.img_x    || 0,
@@ -267,6 +268,31 @@ export function setupSocket(io) {
         db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(tokens), mapId);
         broadcastTokens(sessionId, mapId, tokens, false, null);
       } catch (err) { console.error('DB token-delete error:', err); }
+    });
+
+    // ---- Formes de sorts : ajout ----
+    socket.on('map-shape-add', (data) => {
+      const { sessionId, mapId, shape } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
+      try {
+        const map = db.prepare('SELECT shapes FROM maps WHERE id = ?').get(mapId);
+        const shapes = JSON.parse(map?.shapes || '[]');
+        shapes.push(shape);
+        db.prepare('UPDATE maps SET shapes = ? WHERE id = ?').run(JSON.stringify(shapes), mapId);
+      } catch (err) { console.error('DB shape-add error:', err); }
+      socket.to(sessionId).emit('map-shape-added', { mapId, shape });
+    });
+
+    // ---- Formes de sorts : suppression ----
+    socket.on('map-shape-delete', (data) => {
+      const { sessionId, mapId, shapeId } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
+      try {
+        const map = db.prepare('SELECT shapes FROM maps WHERE id = ?').get(mapId);
+        const shapes = JSON.parse(map?.shapes || '[]').filter(s => s.id !== shapeId);
+        db.prepare('UPDATE maps SET shapes = ? WHERE id = ?').run(JSON.stringify(shapes), mapId);
+      } catch (err) { console.error('DB shape-delete error:', err); }
+      socket.to(sessionId).emit('map-shape-deleted', { mapId, shapeId });
     });
 
     // ---- Dessin : segment live (pas de DB — broadcast only) ----

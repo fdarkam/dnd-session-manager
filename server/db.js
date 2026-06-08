@@ -184,6 +184,8 @@ const newCols = [
   ['maps', 'img_scale', 'REAL DEFAULT 1.0'],
   // Migration Feature 3 : colonne destinataire pour les messages privés MJ → joueur
   ['chat_messages', 'target_user_id', 'TEXT DEFAULT NULL'],
+  // Formes de sorts — tableau JSON stocké comme les drawings
+  ['maps', 'shapes', "TEXT DEFAULT '[]'"],
 ];
 for (const [table, col, def] of newCols) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) {
