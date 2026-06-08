@@ -424,6 +424,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   const currentShapeRef = useRef(null); // forme en cours de dessin (preview live)
   const selectedShapeRef = useRef(null); // forme actuellement sélectionnée
   const isDrawingShapeRef = useRef(false);
+  const isDraggingShapeRef = useRef(null);           // Fix 2 — drag d'une forme sélectionnée
+  const lastShapeDragEmit = useRef(0);               // Fix 2 — throttle broadcast drag forme
+  const shapeLastClickRef = useRef({ id: null, time: 0 }); // Fix 5 — détection double clic
   const shapeTypeRef = useRef('circle');
   const shapeColorRef = useRef('#e74c3c');
   const shapeWidthRef = useRef(2);
@@ -486,6 +489,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [shapeWidth, setShapeWidth] = useState(2);
   const [shapeFilled, setShapeFilled] = useState(true);
   const [shapeOpacity, setShapeOpacity] = useState(0.5);
+  const [newShapeName, setNewShapeName] = useState(''); // Fix 4 — nom de la nouvelle forme
+  const [renamingShape, setRenamingShape] = useState(null); // Fix 5 — renommage inline
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -674,7 +679,6 @@ export default function MapCanvas({ sessionId, isDM }) {
       ctx.strokeStyle = shape.color || '#e74c3c';
       ctx.lineWidth = (shape.width || 2) / z;
       ctx.fillStyle = shape.color || '#e74c3c';
-      if (isSelected) { ctx.shadowColor = '#facc15'; ctx.shadowBlur = 10 / z; }
       ctx.beginPath();
       switch (shape.type) {
         case 'circle': {
@@ -697,6 +701,56 @@ export default function MapCanvas({ sessionId, isDM }) {
           ctx.closePath();
           if (shape.filled) ctx.fill(); ctx.stroke(); break;
         }
+      }
+      // Fix 2 — contour pointillé jaune pour la forme sélectionnée
+      if (isSelected) {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 2 / z;
+        ctx.setLineDash([6 / z, 3 / z]);
+        ctx.beginPath();
+        switch (shape.type) {
+          case 'circle': {
+            const r = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+            ctx.arc(shape.x, shape.y, r, 0, Math.PI * 2); ctx.stroke(); break;
+          }
+          case 'rectangle':
+            ctx.rect(shape.x, shape.y, shape.x2 - shape.x, shape.y2 - shape.y); ctx.stroke(); break;
+          case 'line':
+            ctx.moveTo(shape.x, shape.y); ctx.lineTo(shape.x2, shape.y2); ctx.stroke(); break;
+          case 'cone': {
+            const angle = Math.atan2(shape.y2 - shape.y, shape.x2 - shape.x);
+            const length = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+            const spread = Math.PI / 6;
+            ctx.moveTo(shape.x, shape.y);
+            ctx.lineTo(shape.x + Math.cos(angle - spread) * length, shape.y + Math.sin(angle - spread) * length);
+            ctx.lineTo(shape.x + Math.cos(angle + spread) * length, shape.y + Math.sin(angle + spread) * length);
+            ctx.closePath(); ctx.stroke(); break;
+          }
+        }
+        ctx.setLineDash([]);
+      }
+      // Fix 4 — nom de la forme affiché sous son centre
+      if (shape.name) {
+        let nameX, nameY;
+        switch (shape.type) {
+          case 'circle': {
+            const r = Math.hypot(shape.x2 - shape.x, shape.y2 - shape.y);
+            nameX = shape.x; nameY = shape.y + r + 14 / z; break;
+          }
+          case 'rectangle':
+            nameX = (shape.x + shape.x2) / 2; nameY = Math.max(shape.y, shape.y2) + 14 / z; break;
+          case 'line':
+          case 'cone':
+          default:
+            nameX = (shape.x + shape.x2) / 2; nameY = Math.max(shape.y, shape.y2) + 14 / z; break;
+        }
+        ctx.globalAlpha = 1;
+        ctx.font = `bold ${12 / z}px sans-serif`;
+        ctx.fillStyle = shape.color || '#e74c3c';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(shape.name, nameX, nameY);
       }
       ctx.restore();
     };
@@ -875,6 +929,13 @@ export default function MapCanvas({ sessionId, isDM }) {
     const onKey = (e) => {
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+
+      // Fix 2 — Échap : désélectionner la forme active
+      if (e.key === 'Escape') {
+        if (selectedShapeRef.current) {
+          selectedShapeRef.current = null; setSelectedShape(null); drawFrame(); return;
+        }
+      }
 
       // Ctrl+C — copier le token sélectionné
       if (e.ctrlKey && e.key === 'c') {
@@ -1106,6 +1167,14 @@ export default function MapCanvas({ sessionId, isDM }) {
       const next = [...shapesRef.current, shape];
       shapesRef.current = next; setShapes(next); drawFrame();
     };
+    // Forme mise à jour par un autre joueur (déplacée, propriété modifiée) — Fix 2 & 3
+    const onShapeUpdated = ({ mapId, shape }) => {
+      if (mapId !== activeMapRef.current?.id) return;
+      const next = shapesRef.current.map(s => s.id === shape.id ? shape : s);
+      shapesRef.current = next; setShapes(next);
+      if (selectedShapeRef.current?.id === shape.id) { selectedShapeRef.current = shape; setSelectedShape(shape); }
+      drawFrame();
+    };
     // Forme supprimée par un autre joueur — mise à jour locale
     const onShapeDeleted = ({ mapId, shapeId }) => {
       if (mapId !== activeMapRef.current?.id) return;
@@ -1151,6 +1220,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-image-cleared', onMapImageCleared);
     socket.on('map-fog-explored', onFogExplored);
     socket.on('map-shape-added', onShapeAdded);
+    socket.on('map-shape-updated', onShapeUpdated);
     socket.on('map-shape-deleted', onShapeDeleted);
     return () => {
       socket.off('connect', onConnect);
@@ -1174,6 +1244,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-image-cleared', onMapImageCleared);
       socket.off('map-fog-explored', onFogExplored);
       socket.off('map-shape-added', onShapeAdded);
+      socket.off('map-shape-updated', onShapeUpdated);
       socket.off('map-shape-deleted', onShapeDeleted);
       socket.off('map-sync', onMapSync);
     };
@@ -1374,6 +1445,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         width: shapeWidthRef.current,
         filled: shapeFilledRef.current,
         opacity: shapeOpacityRef.current,
+        name: newShapeName || '', // Fix 4 — nom optionnel
         createdBy: user?.id,
       };
       return;
@@ -1413,11 +1485,34 @@ export default function MapCanvas({ sessionId, isDM }) {
         if (canManage) { saveUndoState(); isDraggingRef.current = clicked; setDragging(clicked); }
         return;
       }
-      // Vérifier si une forme de sort est cliquée avant de panner
+      // Fix 2 & 5 — clic/double clic sur une forme : sélection, drag, renommage
       const clickedShape = shapesRef.current.find(s => hitTestShape(s, pos, 12 / zoomRef.current));
       if (clickedShape) {
+        const nowMs = Date.now();
+        const last = shapeLastClickRef.current;
+        if (last.id === clickedShape.id && (nowMs - last.time) < 350) {
+          // Fix 5 — double clic : afficher input de renommage inline au-dessus du canvas
+          const z = zoomRef.current, pan = panOffsetRef.current;
+          const sh = clickedShape;
+          let nameX, nameY;
+          switch (sh.type) {
+            case 'circle': {
+              const r = Math.hypot(sh.x2 - sh.x, sh.y2 - sh.y);
+              nameX = sh.x * z + pan.x; nameY = (sh.y + r) * z + pan.y + 6; break;
+            }
+            default:
+              nameX = ((sh.x + sh.x2) / 2) * z + pan.x;
+              nameY = Math.max(sh.y, sh.y2) * z + pan.y + 6; break;
+          }
+          setRenamingShape({ id: clickedShape.id, name: clickedShape.name || '', left: nameX, top: nameY });
+          shapeLastClickRef.current = { id: null, time: 0 };
+          return;
+        }
+        shapeLastClickRef.current = { id: clickedShape.id, time: nowMs };
         selectedShapeRef.current = clickedShape; setSelectedShape(clickedShape);
         selectedTokenRef.current = null; setSelectedToken(null); setShowTokenEdit(false);
+        // Fix 2 — démarrer le drag de la forme sélectionnée
+        isDraggingShapeRef.current = { shape: clickedShape, startX: pos.x, startY: pos.y, origX: clickedShape.x, origY: clickedShape.y, origX2: clickedShape.x2, origY2: clickedShape.y2 };
         drawFrame(); return;
       }
       selectedShapeRef.current = null; setSelectedShape(null);
@@ -1491,6 +1586,21 @@ export default function MapCanvas({ sessionId, isDM }) {
       const updSel = { ...(selectedTokenRef.current || t), radius: newR }; selectedTokenRef.current = updSel; setSelectedToken(updSel);
       drawFrame();
       if (socket && now - lastDragEmit.current > 16) { lastDragEmit.current = now; socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokenId: t.id, radius: newR, live: true }); }
+      return;
+    }
+    // Fix 2 — déplacement d'une forme sélectionnée (throttle ~60fps)
+    if (isDraggingShapeRef.current) {
+      const { shape, startX, startY, origX, origY, origX2, origY2 } = isDraggingShapeRef.current;
+      const dx = pos.x - startX, dy = pos.y - startY;
+      const updated = { ...shape, x: origX + dx, y: origY + dy, x2: origX2 + dx, y2: origY2 + dy };
+      const next = shapesRef.current.map(s => s.id === shape.id ? updated : s);
+      shapesRef.current = next;
+      selectedShapeRef.current = updated;
+      drawFrame();
+      if (socket && now - lastShapeDragEmit.current > 16) {
+        lastShapeDragEmit.current = now;
+        if (activeMapRef.current) socket.emit('map-shape-update', { sessionId, mapId: activeMapRef.current.id, shape: updated, live: true });
+      }
       return;
     }
     // Prévisualisation live de la forme en cours de dessin
@@ -1575,6 +1685,16 @@ export default function MapCanvas({ sessionId, isDM }) {
       if (socket && activeMapRef.current) socket.emit('map-fog-paint', { sessionId, mapId: activeMapRef.current.id, fogCells: Array.from(fogCellsRef.current), gridSize: gridSizeRef.current });
     }
     eraserActive.current = false;
+    // Fix 2 — fin du drag d'une forme : sync React state + emit final (DB write côté serveur)
+    if (isDraggingShapeRef.current) {
+      const updatedShape = selectedShapeRef.current;
+      isDraggingShapeRef.current = null;
+      setShapes([...shapesRef.current]);
+      setSelectedShape(updatedShape);
+      if (updatedShape && socket && activeMapRef.current)
+        socket.emit('map-shape-update', { sessionId, mapId: activeMapRef.current.id, shape: updatedShape, live: false });
+      drawFrame();
+    }
     if (resizingToken.current) {
       if (socket) {
         const resizeTok = tokensRef.current.find(tk => tk.id === resizingToken.current.token.id);
@@ -1691,6 +1811,30 @@ export default function MapCanvas({ sessionId, isDM }) {
     updateToken({ ...tok, conditions: next });
   };
 
+  // Fix 3 — met à jour une propriété de la forme sélectionnée et synchronise via socket
+  const updateSelectedShape = (updates) => {
+    if (!selectedShapeRef.current) return;
+    const updated = { ...selectedShapeRef.current, ...updates };
+    const next = shapesRef.current.map(s => s.id === updated.id ? updated : s);
+    shapesRef.current = next; setShapes(next);
+    selectedShapeRef.current = updated; setSelectedShape(updated);
+    drawFrame();
+    if (socket && activeMapRef.current)
+      socket.emit('map-shape-update', { sessionId, mapId: activeMapRef.current.id, shape: updated, live: false });
+  };
+
+  // Fix 3 — supprime la forme sélectionnée (MJ ou créateur uniquement)
+  const deleteSelectedShape = () => {
+    const shape = selectedShapeRef.current;
+    if (!shape) return;
+    const next = shapesRef.current.filter(s => s.id !== shape.id);
+    shapesRef.current = next; setShapes(next);
+    selectedShapeRef.current = null; setSelectedShape(null);
+    drawFrame();
+    if (socket && activeMapRef.current)
+      socket.emit('map-shape-delete', { sessionId, mapId: activeMapRef.current.id, shapeId: shape.id });
+  };
+
   // Feature 5 — valider le renommage de la map active
   const saveMapName = () => {
     if (editingMapName === null) return;
@@ -1734,7 +1878,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         <div style={{ display: 'flex', gap: '2px' }}>
           {[{ id: 'move', icon: '✋', label: 'Déplacer' }, ...dmTools].map(t => (
             <button key={t.id} className={`btn btn-sm ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setTool(t.id)} title={t.label} style={{ fontSize: '0.9rem' }}>{t.icon}</button>
+              onClick={() => setTool(tool === t.id ? 'move' : t.id)} title={t.label} style={{ fontSize: '0.9rem' }}>{t.icon}</button>
           ))}
         </div>
 
@@ -1782,8 +1926,41 @@ export default function MapCanvas({ sessionId, isDM }) {
               style={{ width: '55px', cursor: 'pointer' }} />
           </div>
         )}
-        {/* Sous-panneau formes de sorts — accessible à tous */}
-        {tool === 'shape' && (
+        {/* Fix 3 — toolbar contextuelle quand une forme est sélectionnée */}
+        {selectedShape ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ color: '#aaa', fontSize: '12px', flexShrink: 0, maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={selectedShape.name || 'Sans nom'}>
+              {selectedShape.name || 'Sans nom'}
+            </span>
+            <input type="color" value={selectedShape.color}
+              onChange={e => updateSelectedShape({ color: e.target.value })}
+              style={{ width: '24px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+              Épais.
+              <input type="range" min="1" max="10" value={selectedShape.width}
+                onChange={e => updateSelectedShape({ width: +e.target.value })}
+                style={{ width: '55px', cursor: 'pointer' }} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+              Opacité
+              <input type="range" min="0.1" max="1" step="0.1" value={selectedShape.opacity}
+                onChange={e => updateSelectedShape({ opacity: +e.target.value })}
+                style={{ width: '55px', cursor: 'pointer' }} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={selectedShape.filled}
+                onChange={e => updateSelectedShape({ filled: e.target.checked })} />
+              Rempli
+            </label>
+            {(isDM || selectedShape.createdBy === user?.id) && (
+              <button className="btn btn-sm btn-danger" onClick={deleteSelectedShape} title="Supprimer la forme">🗑️</button>
+            )}
+            <button className="btn btn-sm btn-secondary"
+              onClick={() => { selectedShapeRef.current = null; setSelectedShape(null); drawFrame(); }}
+              title="Désélectionner (Échap)">✕</button>
+          </div>
+        ) : tool === 'shape' && (
           <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
             {[
               { type: 'circle', icon: '⭕', label: 'Cercle' },
@@ -1798,6 +1975,9 @@ export default function MapCanvas({ sessionId, isDM }) {
                 {icon} {label}
               </button>
             ))}
+            {/* Fix 4 — champ nom optionnel pour la forme à créer */}
+            <input type="text" value={newShapeName} onChange={e => setNewShapeName(e.target.value)}
+              placeholder="Nom (opt.)" style={{ width: '90px', padding: '2px 5px', fontSize: '0.8rem' }} />
             <input type="color" value={shapeColor}
               onChange={e => { setShapeColor(e.target.value); shapeColorRef.current = e.target.value; }}
               style={{ width: '24px', height: '22px', padding: 0, border: 'none', cursor: 'pointer' }} />
@@ -1815,16 +1995,6 @@ export default function MapCanvas({ sessionId, isDM }) {
               onChange={e => { const v = Number(e.target.value); setShapeOpacity(v); shapeOpacityRef.current = v; }}
               style={{ width: '60px', cursor: 'pointer' }} />
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{Math.round(shapeOpacity * 100)}%</span>
-            {selectedShape && (
-              <button className="btn btn-sm btn-danger" title="Supprimer la forme sélectionnée"
-                onClick={() => {
-                  const next = shapesRef.current.filter(s => s.id !== selectedShape.id);
-                  shapesRef.current = next; setShapes(next);
-                  selectedShapeRef.current = null; setSelectedShape(null); drawFrame();
-                  if (socket && activeMapRef.current)
-                    socket.emit('map-shape-delete', { sessionId, mapId: activeMapRef.current.id, shapeId: selectedShape.id });
-                }}>🗑️ Forme</button>
-            )}
           </div>
         )}
 
@@ -2047,6 +2217,31 @@ export default function MapCanvas({ sessionId, isDM }) {
           ref={cursorCanvasRef}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}
         />
+        {/* Fix 5 — input inline de renommage d'une forme, positionné directement sur le canvas */}
+        {renamingShape && (
+          <input
+            autoFocus
+            defaultValue={renamingShape.name}
+            style={{
+              position: 'absolute',
+              left: renamingShape.left,
+              top: renamingShape.top,
+              transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.85)',
+              color: 'white',
+              border: '1px solid #facc15',
+              borderRadius: '4px',
+              padding: '2px 8px',
+              fontSize: '12px',
+              textAlign: 'center',
+              zIndex: 500,
+              minWidth: '80px',
+              outline: 'none',
+            }}
+            onBlur={e => { updateSelectedShape({ name: e.target.value }); setRenamingShape(null); }}
+            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setRenamingShape(null); }}
+          />
+        )}
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
         {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} onToggleCondition={toggleCondition} />}
