@@ -219,7 +219,7 @@ function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
 }
 
 // ─── Token edit panel (draggable) ────────────────────────────────────────────
-function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, onToggleCondition }) {
+function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, onToggleCondition, sessionId }) {
   const { token: authToken, user } = useAuth();
   const canEdit = isDM || !token.createdBy || token.createdBy === user?.id;
   const [name, setName] = useState(token.name || '');
@@ -234,6 +234,9 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
   const [visionRadius, setVisionRadius] = useState(
     token.visionRadius !== undefined ? token.visionRadius : (token.nightVision ? 'enhanced' : 'normal')
   );
+  // characterId : lien optionnel vers un personnage — synchro automatique des statuts combat
+  const [characterId, setCharacterId] = useState(token.characterId || null);
+  const [characters, setCharacters] = useState([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
@@ -248,10 +251,20 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
     setLocked(!!token.locked);
     // Sync visionRadius — priorité à visionRadius, fallback sur nightVision pour les anciens tokens
     setVisionRadius(token.visionRadius !== undefined ? token.visionRadius : (token.nightVision ? 'enhanced' : 'normal'));
+    setCharacterId(token.characterId || null);
   }, [token.id]);
 
   // Repositionner quand un token différent est ouvert
   useEffect(() => { if (initialPos) setPos(initialPos); }, [token.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Charger les personnages de la session pour le lien token↔combat (MJ uniquement)
+  useEffect(() => {
+    if (!isDM || !sessionId) return;
+    fetch(`${API}/sessions/${sessionId}/characters`, { headers: { Authorization: `Bearer ${authToken}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setCharacters(Array.isArray(data) ? data : []))
+      .catch(() => setCharacters([]));
+  }, [isDM, sessionId, authToken]);
 
   const startDrag = (e) => {
     if (e.button !== 0) return;
@@ -289,7 +302,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
     } catch { /* ignore */ }
     setUploading(false);
   };
-  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius, nightVision: visionRadius === 'enhanced' });
+  const apply = () => onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius, nightVision: visionRadius === 'enhanced', characterId });
   // Met à jour visionRadius et synchronise nightVision (rétrocompat) en un seul appel
   const updateVision = (vr) => {
     setVisionRadius(vr);
@@ -364,6 +377,24 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
                 style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'enhanced' ? '#1a4a8a' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
               >Étendu</button>
             </div>
+          </div>
+        )}
+        {/* Lien token↔personnage — synchro automatique des statuts de combat (MJ uniquement) */}
+        {isDM && characters.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
+            <span style={{ fontSize: '11px', color: '#aaa', flexShrink: 0 }}>Perso :</span>
+            <select
+              value={characterId || ''}
+              onChange={e => {
+                const val = e.target.value || null;
+                setCharacterId(val);
+                onUpdate({ ...token, name, color, borderColor, radius: clamp(radius, 10, 120), image, hidden, locked, visionRadius, nightVision: visionRadius === 'enhanced', characterId: val });
+              }}
+              style={{ flex: 1, fontSize: '11px', padding: '3px 4px', background: 'var(--bg-tertiary)', border: '1px solid #555', borderRadius: '4px', color: '#fff' }}
+            >
+              <option value="">— Aucun —</option>
+              {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
         )}
         <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>Suppr pour effacer • Glisser coin pour redimensionner</span>
@@ -533,6 +564,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [shapeOpacity, setShapeOpacity] = useState(0.5);
   const [newShapeName, setNewShapeName] = useState(''); // Fix 4 — nom de la nouvelle forme
   const [renamingShape, setRenamingShape] = useState(null); // Fix 5 — renommage inline
+  const [tokenTooltip, setTokenTooltip] = useState(null); // tooltip flottant "Créé par X" au double clic
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -710,6 +742,27 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
       ctx.fillStyle = 'rgba(0,0,0,0.8)';
       ctx.fill(fogPath);
+    }
+
+    // ─── Dégradé aux bords du rayon de vision (joueurs uniquement) ──────────
+    // Adoucit la transition franche entre zone révélée et fog en superposant
+    // un voile sombre de 0% (cœur) à 30% opacité (bord) sur chaque rayon joueur.
+    if (!dm && gs > 0) {
+      tokensRef.current.forEach(tok => {
+        if (tok.hidden || tok.visionRadius === 0) return;
+        const vr = (tok.visionRadius === 'enhanced' || (tok.visionRadius === undefined && tok.nightVision))
+          ? VISION_ENHANCED * gs
+          : VISION_NORMAL * gs;
+        const vis = tokenVisualsRef.current[tok.id];
+        const tx = vis?.x ?? tok.x, ty = vis?.y ?? tok.y;
+        const grad = ctx.createRadialGradient(tx, ty, vr * 0.6, tx, ty, vr);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.3)');
+        ctx.beginPath();
+        ctx.arc(tx, ty, vr, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      });
     }
 
     // ─── Formes de sorts ─────────────────────────────────────────────────────
@@ -1264,6 +1317,22 @@ export default function MapCanvas({ sessionId, isDM }) {
       }
       drawFrame();
     };
+    // Synchro des statuts de combat vers les conditions du token lié par characterId
+    const onCombatUpdated = ({ encounter }) => {
+      if (!encounter?.entities) return;
+      let changed = false;
+      const updated = tokensRef.current.map(tok => {
+        if (!tok.characterId) return tok;
+        const entity = encounter.entities.find(e => e.characterId === tok.characterId);
+        if (!entity?.statuses) return tok;
+        changed = true;
+        return { ...tok, conditions: entity.statuses };
+      });
+      if (!changed) return;
+      tokensRef.current = updated;
+      setTokens(updated);
+      drawFrame();
+    };
 
     socket.on('map-token-update', onTokenUpdate);
     socket.on('map-list-updated', onMapListUpdated);
@@ -1287,6 +1356,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     socket.on('map-shape-added', onShapeAdded);
     socket.on('map-shape-updated', onShapeUpdated);
     socket.on('map-shape-deleted', onShapeDeleted);
+    socket.on('combat-updated', onCombatUpdated);
     return () => {
       socket.off('connect', onConnect);
       socket.off('map-token-update', onTokenUpdate);
@@ -1311,6 +1381,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       socket.off('map-shape-added', onShapeAdded);
       socket.off('map-shape-updated', onShapeUpdated);
       socket.off('map-shape-deleted', onShapeDeleted);
+      socket.off('combat-updated', onCombatUpdated);
       socket.off('map-sync', onMapSync);
     };
   }, [socket, startLerpAnimation, drawFrame]);
@@ -1464,6 +1535,8 @@ export default function MapCanvas({ sessionId, isDM }) {
 
   // ─── Mouse handlers ───────────────────────────────────────────────────────
   const handleMouseDown = (e) => {
+    // Fermer le tooltip "Créé par" au prochain clic
+    if (tokenTooltip) setTokenTooltip(null);
     if (e.button === 2) {
       const pos = getWorldPos(e);
       if (socket) socket.emit('map-ping', { sessionId, x: pos.x, y: pos.y });
@@ -1847,27 +1920,38 @@ export default function MapCanvas({ sessionId, isDM }) {
         });
       }
     }
-    // Single click (no drag) → detect double-click to open edit panel
+    // Simple clic (sans drag) → détection double clic : panel si propriétaire, sinon tooltip créateur
     if (wasDragging && !dragMoved.current) {
       const now = Date.now();
       const last = tokenLastClickRef.current;
       if (last.id === wasDragging.id && (now - last.time) < 350) {
-        // Calculer la position initiale du panneau d'édition près du token (Fix 4)
         const tok = tokensRef.current.find(t => t.id === wasDragging.id);
         if (tok) {
+          const canManageTok = isDM || !tok.createdBy || tok.createdBy === user?.id;
           const z = zoomRef.current;
           const pan = panOffsetRef.current;
           const r = clamp(tok.radius || 22, 10, 120);
-          const panelW = 248;
-          const contW = containerRef.current?.clientWidth || 600;
-          const contH = containerRef.current?.clientHeight || 400;
-          const tokSx = tok.x * z + pan.x;
-          const tokSy = tok.y * z + pan.y;
-          const sx = (tokSx + r + 12 + panelW < contW) ? tokSx + r + 12 : Math.max(8, tokSx - r - panelW - 12);
-          const sy = Math.max(8, Math.min(contH - 280, tokSy - r));
-          setTokenEditPos({ x: Math.max(8, sx), y: sy });
+          if (canManageTok) {
+            // MJ ou créateur du token : ouvrir le panneau d'édition
+            const panelW = 248;
+            const contW = containerRef.current?.clientWidth || 600;
+            const contH = containerRef.current?.clientHeight || 400;
+            const tokSx = tok.x * z + pan.x;
+            const tokSy = tok.y * z + pan.y;
+            const sx = (tokSx + r + 12 + panelW < contW) ? tokSx + r + 12 : Math.max(8, tokSx - r - panelW - 12);
+            const sy = Math.max(8, Math.min(contH - 280, tokSy - r));
+            setTokenEditPos({ x: Math.max(8, sx), y: sy });
+            setShowTokenEdit(true);
+          } else {
+            // Joueur non-propriétaire : afficher tooltip "Créé par X" pendant 2 secondes
+            setTokenTooltip({
+              x: tok.x * z + pan.x,
+              y: tok.y * z + pan.y,
+              createdBy: tok.createdByName || tok.createdBy || '?',
+            });
+            setTimeout(() => setTokenTooltip(null), 2000);
+          }
         }
-        setShowTokenEdit(true);
       }
       tokenLastClickRef.current = { id: wasDragging.id, time: now };
     }
@@ -2306,8 +2390,8 @@ export default function MapCanvas({ sessionId, isDM }) {
                     // Pas de overflow:hidden ici — le box-shadow doit déborder du cercle
                     opacity: inFog ? 0 : (t.hidden ? 0.5 : 1),
                     // Anneau de bordure + halo de sélection en CSS (toujours au-dessus du canvas)
-                    // Fix 2 : le glow utilise selectedToken (state React local) — jamais visible par les autres clients
-                    boxShadow: t.id === selectedToken?.id
+                    // Glow uniquement pour les tokens que l'utilisateur peut modifier (créateur ou MJ)
+                    boxShadow: (t.id === selectedToken?.id && (isDM || !t.createdBy || t.createdBy === user?.id))
                       ? `0 0 0 2px #facc15, 0 0 0 8px rgba(250,204,21,0.35)`
                       : `0 0 0 2px ${t.borderColor || '#fff'}`,
                   }}
@@ -2341,6 +2425,25 @@ export default function MapCanvas({ sessionId, isDM }) {
           ref={cursorCanvasRef}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}
         />
+        {/* Tooltip flottant "Créé par X" — double clic sur un token non-éditable par ce joueur */}
+        {tokenTooltip && (
+          <div style={{
+            position: 'absolute',
+            left: tokenTooltip.x,
+            top: tokenTooltip.y - 30,
+            transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,0.82)',
+            color: 'white',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            pointerEvents: 'none',
+            zIndex: 400,
+            whiteSpace: 'nowrap',
+          }}>
+            Créé par {tokenTooltip.createdBy}
+          </div>
+        )}
         {/* Fix 5 — input inline de renommage d'une forme, positionné directement sur le canvas */}
         {renamingShape && (
           <input
@@ -2368,7 +2471,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         )}
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
-        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} onToggleCondition={toggleCondition} />}
+        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} sessionId={sessionId} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} onToggleCondition={toggleCondition} />}
       </div>
     </div>
   );
