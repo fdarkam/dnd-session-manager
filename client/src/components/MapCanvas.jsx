@@ -218,6 +218,105 @@ function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
   );
 }
 
+// ─── Fenêtre info token — lecture seule, draggable, fermeture auto 5 s ──────
+function TokenInfoPanel({ info, onClose, containerRef }) {
+  const [pos, setPos] = useState({ x: info.x, y: info.y });
+  const dragRef = useRef(false);
+  const oriRef = useRef({});
+  const timerRef = useRef(null);
+  // Ref toujours fraîche vers onClose pour éviter les closures périmées dans le timer
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Lance (ou reporte) la fermeture automatique dans 5 secondes
+  const scheduleClose = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => onCloseRef.current?.(), 5000);
+  }, []);
+
+  useEffect(() => {
+    scheduleClose();
+    return () => clearTimeout(timerRef.current);
+  }, [scheduleClose]);
+
+  const startDrag = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    scheduleClose();
+    dragRef.current = true;
+    document.body.style.cursor = 'grabbing';
+    document.documentElement.style.userSelect = 'none';
+    oriRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
+    const mv = (ev) => {
+      if (!dragRef.current) return;
+      const contW = containerRef.current?.clientWidth || 600;
+      const contH = containerRef.current?.clientHeight || 400;
+      setPos({
+        x: Math.max(0, Math.min(contW - 175, oriRef.current.px + ev.clientX - oriRef.current.mx)),
+        y: Math.max(0, Math.min(contH - 40, oriRef.current.py + ev.clientY - oriRef.current.my)),
+      });
+    };
+    const up = () => {
+      dragRef.current = false;
+      document.body.style.cursor = '';
+      document.documentElement.style.userSelect = '';
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+    e.preventDefault();
+  };
+
+  return (
+    <div
+      onMouseDown={startDrag}
+      onMouseMove={scheduleClose}
+      style={{
+        position: 'absolute', left: pos.x, top: pos.y,
+        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+        borderRadius: 'var(--radius-md)', padding: '10px', minWidth: '160px',
+        zIndex: 350, boxShadow: '0 4px 20px rgba(0,0,0,0.65)',
+        color: 'var(--text-primary)', fontSize: '13px',
+        cursor: 'grab', userSelect: 'none',
+      }}
+    >
+      {/* En-tête */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <span style={{ fontWeight: 700, fontSize: '0.75rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-heading)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Info Token</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', padding: '0 2px' }}>✕</button>
+      </div>
+      {/* Nom du token */}
+      <div style={{ marginBottom: '5px' }}>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem', display: 'block' }}>Nom</span>
+        <span style={{ fontWeight: 600, fontSize: '0.82rem', cursor: 'default' }}>{info.name}</span>
+      </div>
+      {/* Créateur */}
+      <div style={{ marginBottom: '5px' }}>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem', display: 'block' }}>Créé par</span>
+        <span style={{ fontWeight: 500, fontSize: '0.82rem', cursor: 'default' }}>{info.createdBy}</span>
+      </div>
+      {/* Statuts actifs — conditionnels */}
+      {info.conditions?.length > 0 && (
+        <div>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem', display: 'block', marginBottom: '3px' }}>Statuts</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', cursor: 'default' }}>
+            {info.conditions.map(condId => {
+              const cond = CONDITIONS.find(c => c.id === condId);
+              if (!cond) return null;
+              return (
+                <span key={condId} style={{ background: cond.color, borderRadius: '4px', padding: '2px 5px', fontSize: '11px', color: '#fff' }}>
+                  {cond.emoji} {cond.label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Token edit panel (draggable) ────────────────────────────────────────────
 function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, onToggleCondition, sessionId }) {
   const { token: authToken, user } = useAuth();
@@ -564,7 +663,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const [shapeOpacity, setShapeOpacity] = useState(0.5);
   const [newShapeName, setNewShapeName] = useState(''); // Fix 4 — nom de la nouvelle forme
   const [renamingShape, setRenamingShape] = useState(null); // Fix 5 — renommage inline
-  const [tokenTooltip, setTokenTooltip] = useState(null); // tooltip flottant "Créé par X" au double clic
+  const [tokenInfo, setTokenInfo] = useState(null); // fenêtre info token au double clic (lecture seule)
 
   // ── Keep refs in sync with state ──
   useEffect(() => { if (!isDraggingRef.current) tokensRef.current = tokens; }, [tokens]);
@@ -1535,8 +1634,8 @@ export default function MapCanvas({ sessionId, isDM }) {
 
   // ─── Mouse handlers ───────────────────────────────────────────────────────
   const handleMouseDown = (e) => {
-    // Fermer le tooltip "Créé par" au prochain clic
-    if (tokenTooltip) setTokenTooltip(null);
+    // Fermer la fenêtre info token au prochain clic sur le canvas
+    if (tokenInfo) setTokenInfo(null);
     if (e.button === 2) {
       const pos = getWorldPos(e);
       if (socket) socket.emit('map-ping', { sessionId, x: pos.x, y: pos.y });
@@ -1972,14 +2071,23 @@ export default function MapCanvas({ sessionId, isDM }) {
         setTokenEditPos({ x: Math.max(8, sx), y: sy });
         setShowTokenEdit(true);
       } else {
-        // Autre joueur : tooltip "Créé par X" pendant 2 secondes
-        // Coordonnées écran relatives au container pour l'absolute positioning
-        setTokenTooltip({
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
+        // Autre joueur : fenêtre info token (lecture seule, draggable, fermeture auto 5 s)
+        // Positionnée à côté du token en restant dans les bords du container
+        const r = clamp(tok.radius || 22, 10, 120);
+        const infoW = 175;
+        const contW = containerRef.current?.clientWidth || 600;
+        const contH = containerRef.current?.clientHeight || 400;
+        const tokSx = tok.x * z + pan.x;
+        const tokSy = tok.y * z + pan.y;
+        const sx = (tokSx + r + 10 + infoW < contW) ? tokSx + r + 10 : Math.max(8, tokSx - r - infoW - 10);
+        const sy = Math.max(8, Math.min(contH - 160, tokSy - r));
+        setTokenInfo({
+          x: Math.max(8, sx),
+          y: sy,
+          name: tok.name || '?',
           createdBy: tok.createdByName || tok.created_by_username || tok.createdBy || '?',
+          conditions: tok.conditions || [],
         });
-        setTimeout(() => setTokenTooltip(null), 2000);
       }
     };
     canvas.addEventListener('dblclick', onDblClick);
@@ -2439,24 +2547,13 @@ export default function MapCanvas({ sessionId, isDM }) {
           ref={cursorCanvasRef}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}
         />
-        {/* Tooltip flottant "Créé par X" — double clic sur un token non-éditable par ce joueur */}
-        {tokenTooltip && (
-          <div style={{
-            position: 'absolute',
-            left: tokenTooltip.x,
-            top: tokenTooltip.y - 30,
-            transform: 'translateX(-50%)',
-            background: 'rgba(0,0,0,0.82)',
-            color: 'white',
-            padding: '4px 10px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            pointerEvents: 'none',
-            zIndex: 400,
-            whiteSpace: 'nowrap',
-          }}>
-            Créé par {tokenTooltip.createdBy}
-          </div>
+        {/* Fenêtre info token — double clic sur un token non-éditable par ce joueur */}
+        {tokenInfo && (
+          <TokenInfoPanel
+            info={tokenInfo}
+            onClose={() => setTokenInfo(null)}
+            containerRef={containerRef}
+          />
         )}
         {/* Fix 5 — input inline de renommage d'une forme, positionné directement sur le canvas */}
         {renamingShape && (
