@@ -1,38 +1,17 @@
 import { useState, useRef } from 'react';
+import { useDraggable } from '../../hooks/useDraggable';
 
 // ─── Floating resizable panel ────────────────────────────────────────────────
 export default function FloatingPanel({ title, defaultPos, defaultSize, onClose, children }) {
   const [pos, setPos] = useState(defaultPos || { x: 16, y: 16 });
   const [size, setSize] = useState(defaultSize || { w: 320, h: 480 });
-  const drag = useRef(false);
   const ori = useRef({});
 
-  const startDrag = (e) => {
-    if (e.button !== 0) return;
-    // Ne pas démarrer le drag depuis un élément interactif
-    if (e.target.closest('button, input, select, textarea, a, label')) return;
-    drag.current = true;
-    document.body.style.cursor = 'grabbing';
-    document.documentElement.style.userSelect = 'none';
-    ori.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
-    const mv = (ev) => {
-      if (!drag.current) return;
-      setPos({
-        x: Math.max(0, Math.min(window.innerWidth - size.w, ori.current.px + ev.clientX - ori.current.mx)),
-        y: Math.max(0, Math.min(window.innerHeight - 40, ori.current.py + ev.clientY - ori.current.my)),
-      });
-    };
-    const up = () => {
-      drag.current = false;
-      document.body.style.cursor = '';
-      document.documentElement.style.userSelect = '';
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    };
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
-    e.preventDefault();
-  };
+  // Ne pas démarrer le drag depuis un élément interactif (sélecteur par défaut du hook)
+  const startDrag = useDraggable(pos, setPos, (rawX, rawY) => ({
+    x: Math.max(0, Math.min(window.innerWidth - size.w, rawX)),
+    y: Math.max(0, Math.min(window.innerHeight - 40, rawY)),
+  }));
 
   const startResize = (corner) => (e) => {
     ori.current = { mx: e.clientX, my: e.clientY, w: size.w, h: size.h, px: pos.x, py: pos.y };

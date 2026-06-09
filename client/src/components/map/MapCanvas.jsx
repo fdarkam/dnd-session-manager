@@ -21,6 +21,7 @@ import CombatTracker from '../CombatTracker';
 import { getHandlesForShape, getClickedHandle, hitTestShape } from './geometry';
 import { CONDITIONS } from '../../domain/conditions';
 import FloatingPanel from '../common/FloatingPanel';
+import { useDraggable } from '../../hooks/useDraggable';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
@@ -34,8 +35,6 @@ const VISION_ENHANCED = 6; // tokens avec nightVision: true (vision nocturne ét
 // ─── Fenêtre info token — lecture seule, draggable, fermeture auto 5 s ──────
 function TokenInfoPanel({ info, onClose, containerRef }) {
   const [pos, setPos] = useState({ x: info.x, y: info.y });
-  const dragRef = useRef(false);
-  const oriRef = useRef({});
   const timerRef = useRef(null);
   // Ref toujours fraîche vers onClose pour éviter les closures périmées dans le timer
   const onCloseRef = useRef(onClose);
@@ -52,34 +51,15 @@ function TokenInfoPanel({ info, onClose, containerRef }) {
     return () => clearTimeout(timerRef.current);
   }, [scheduleClose]);
 
-  const startDrag = (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('button')) return;
-    scheduleClose();
-    dragRef.current = true;
-    document.body.style.cursor = 'grabbing';
-    document.documentElement.style.userSelect = 'none';
-    oriRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
-    const mv = (ev) => {
-      if (!dragRef.current) return;
-      const contW = containerRef.current?.clientWidth || 600;
-      const contH = containerRef.current?.clientHeight || 400;
-      setPos({
-        x: Math.max(0, Math.min(contW - 175, oriRef.current.px + ev.clientX - oriRef.current.mx)),
-        y: Math.max(0, Math.min(contH - 40, oriRef.current.py + ev.clientY - oriRef.current.my)),
-      });
+  // contW/contH lus à chaque mousemove via containerRef (dimensions live), comme avant.
+  const startDrag = useDraggable(pos, setPos, (rawX, rawY) => {
+    const contW = containerRef.current?.clientWidth || 600;
+    const contH = containerRef.current?.clientHeight || 400;
+    return {
+      x: Math.max(0, Math.min(contW - 175, rawX)),
+      y: Math.max(0, Math.min(contH - 40, rawY)),
     };
-    const up = () => {
-      dragRef.current = false;
-      document.body.style.cursor = '';
-      document.documentElement.style.userSelect = '';
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    };
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
-    e.preventDefault();
-  };
+  }, { skip: 'button', onStart: scheduleClose });
 
   return (
     <div
@@ -154,8 +134,6 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
 
   // Fix 4: position draggable
   const [pos, setPos] = useState(initialPos || { x: 8, y: 8 });
-  const dragRef = useRef(false);
-  const oriRef = useRef({});
 
   useEffect(() => {
     setName(token.name || ''); setColor(token.color || '#c9a84c'); setBorderColor(token.borderColor || '#ffffff');
@@ -178,31 +156,10 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
       .catch(() => setCharacters([]));
   }, [isDM, sessionId, authToken]);
 
-  const startDrag = (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('button, input, select, textarea, a, label')) return;
-    dragRef.current = true;
-    document.body.style.cursor = 'grabbing';
-    document.documentElement.style.userSelect = 'none';
-    oriRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
-    const mv = (ev) => {
-      if (!dragRef.current) return;
-      setPos({
-        x: Math.max(0, oriRef.current.px + ev.clientX - oriRef.current.mx),
-        y: Math.max(0, oriRef.current.py + ev.clientY - oriRef.current.my),
-      });
-    };
-    const up = () => {
-      dragRef.current = false;
-      document.body.style.cursor = '';
-      document.documentElement.style.userSelect = '';
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    };
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
-    e.preventDefault();
-  };
+  const startDrag = useDraggable(pos, setPos, (rawX, rawY) => ({
+    x: Math.max(0, rawX),
+    y: Math.max(0, rawY),
+  }));
 
   const handleFile = async (e) => {
     const f = e.target.files[0]; if (!f) return;
