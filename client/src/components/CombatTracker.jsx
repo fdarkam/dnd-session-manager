@@ -38,12 +38,10 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [entityInit, setEntityInit] = useState('');
   const [entityHP, setEntityHP] = useState('');
   const [entityType, setEntityType] = useState('enemy');
+  // Fix 2 : erreurs de validation du formulaire entité manuelle
+  const [entityErrors, setEntityErrors] = useState({});
 
   // ── Panneau ajout MJ ──────────────────────────────────────────────────────────
-  // showAddPanel : affiche le panneau à deux sections
-  // sessionCharacters : toutes les fiches de la session, pour la section 1
-  // selectedCharacter : fiche sélectionnée dans la liste (ouvre le mini-formulaire)
-  // dmAddInit : initiative saisie dans le mini-formulaire depuis une fiche
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [sessionCharacters, setSessionCharacters] = useState([]);
   const [selectedCharacter, setSelectedCharacter] = useState(null);
@@ -56,7 +54,9 @@ export default function CombatTracker({ sessionId, isDM }) {
   const [joinInit, setJoinInit] = useState('');
   const [joinHp, setJoinHp] = useState('');
   const [joinHpMax, setJoinHpMax] = useState('');
-  const [joinAc, setJoinAc] = useState('');
+  // Fix 3 : suppression de l'état joinAc — le champ CA est retiré du formulaire
+  // Fix 2 : erreurs de validation du formulaire rejoindre
+  const [joinErrors, setJoinErrors] = useState({});
   // myCharacter : fiche du joueur connecté (utilisée dans le flow "Rejoindre")
   const [myCharacter, setMyCharacter] = useState(null);
 
@@ -70,8 +70,6 @@ export default function CombatTracker({ sessionId, isDM }) {
   useEffect(() => { fetchEncounter(); }, [sessionId]);
 
   // Charge toutes les fiches de la session.
-  // Le MJ a besoin de la liste complète (section 1 du panneau ajout).
-  // Le joueur garde myCharacter (premier résultat) pour rejoindre avec sa propre fiche.
   useEffect(() => {
     if (!sessionId) return;
     fetch(`${API}/characters/session/${sessionId}`, {
@@ -171,9 +169,18 @@ export default function CombatTracker({ sessionId, isDM }) {
     }
   };
 
-  // Ajout d'une entité manuelle par le MJ (section 2 du panneau)
+  // Fix 2 : validation des champs obligatoires avant ajout d'une entité manuelle
   const addEntity = () => {
-    if (!entityName.trim() || !encounter) return;
+    if (!encounter) return;
+    const errors = {};
+    if (!entityName.trim()) errors.name = 'Nom requis';
+    if (!entityInit || isNaN(parseInt(entityInit))) errors.initiative = 'Initiative requise';
+    if (!entityHP || isNaN(parseInt(entityHP))) errors.hp = 'PV requis';
+    if (Object.keys(errors).length > 0) {
+      setEntityErrors(errors);
+      return;
+    }
+    setEntityErrors({});
     const entities = [
       ...(encounter.entities || []),
       {
@@ -194,8 +201,15 @@ export default function CombatTracker({ sessionId, isDM }) {
     setEntityName(''); setEntityInit(''); setEntityHP('');
   };
 
-  // Ajoute une entité depuis une fiche joueur : nom/PV/CA pré-remplis,
-  // characterId stocké pour rester synchronisé avec la fiche en temps réel
+  // Fix 2 : touche Entrée sur les champs entité manuelle déclenche la validation
+  const handleEntityKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addEntity();
+    }
+  };
+
+  // Fix 3 : suppression de ac dans la création depuis une fiche joueur
   const addFromSheet = () => {
     if (!selectedCharacter || !encounter) return;
     const newEntity = {
@@ -204,7 +218,6 @@ export default function CombatTracker({ sessionId, isDM }) {
       initiative: parseInt(dmAddInit) || 0,
       hp: selectedCharacter.hp_current ?? selectedCharacter.hp_max ?? 10,
       hp_max: selectedCharacter.hp_max ?? 10,
-      ac: selectedCharacter.ac ?? 10,
       type: 'player',
       characterId: selectedCharacter.id,
       addedBy: user?.id,
@@ -215,7 +228,6 @@ export default function CombatTracker({ sessionId, isDM }) {
     const updated = { ...encounter, entities };
     setEncounter(updated);
     broadcastUpdate(updated);
-    // Fermer le panneau et réinitialiser la sélection
     closeDmAddPanel();
   };
 
@@ -225,10 +237,26 @@ export default function CombatTracker({ sessionId, isDM }) {
     setSelectedCharacter(null);
     setDmAddInit('');
     setEntityName(''); setEntityInit(''); setEntityHP('');
+    setEntityErrors({});
   };
 
+  // Fix 2 : validation des champs obligatoires avant de rejoindre le combat
+  // Fix 3 : suppression de ac dans la structure de l'entité créée
   const joinCombat = () => {
     if (!encounter) return;
+    const errors = {};
+    if (!joinInit || isNaN(parseInt(joinInit))) {
+      errors.initiative = 'Initiative requise';
+    }
+    if (joinType === 'companion') {
+      if (!joinName.trim()) errors.name = 'Nom requis';
+      if (!joinHp || isNaN(parseInt(joinHp))) errors.hp = 'PV requis';
+    }
+    if (Object.keys(errors).length > 0) {
+      setJoinErrors(errors);
+      return;
+    }
+    setJoinErrors({});
     let newEntity;
     if (joinType === 'character' && myCharacter) {
       newEntity = {
@@ -237,7 +265,6 @@ export default function CombatTracker({ sessionId, isDM }) {
         initiative: parseInt(joinInit) || 0,
         hp: myCharacter.hp_current ?? myCharacter.hp_max ?? 10,
         hp_max: myCharacter.hp_max ?? 10,
-        ac: myCharacter.ac ?? 10,
         type: 'player',
         userId: user?.id,
         characterId: myCharacter.id,
@@ -245,14 +272,12 @@ export default function CombatTracker({ sessionId, isDM }) {
         statuses: [],
       };
     } else {
-      if (!joinName.trim()) return;
       newEntity = {
         id: Date.now().toString(),
         name: joinName,
         initiative: parseInt(joinInit) || 0,
         hp: parseInt(joinHp) || 10,
         hp_max: parseInt(joinHpMax) || parseInt(joinHp) || 10,
-        ac: parseInt(joinAc) || 10,
         type: 'npc',
         addedBy: user?.id,
         statuses: [],
@@ -265,7 +290,15 @@ export default function CombatTracker({ sessionId, isDM }) {
     broadcastUpdate(updated);
     setShowJoin(false);
     setJoinType('character');
-    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinHpMax(''); setJoinAc('');
+    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinHpMax('');
+  };
+
+  // Fix 2 : touche Entrée sur les champs du formulaire "Rejoindre" déclenche la validation
+  const handleJoinKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      joinCombat();
+    }
   };
 
   const removeEntity = (id) => {
@@ -412,6 +445,12 @@ export default function CombatTracker({ sessionId, isDM }) {
     activeEntity.addedBy === user?.id || activeEntity.userId === user?.id
   );
 
+  // Fix 1 : détecte si le joueur connecté est déjà présent dans le combat (hors compagnons)
+  // Vérifie userId (ajout direct) OU characterId (ajout par le MJ depuis une fiche)
+  const alreadyInCombat = !isDM && !!encounter?.entities?.some(
+    e => e.userId === user?.id || (myCharacter?.id && e.characterId === myCharacter.id)
+  );
+
   // ── Aucun combat actif ───────────────────────────────────────────────────────
   if (!encounter) {
     return (
@@ -497,16 +536,8 @@ export default function CombatTracker({ sessionId, isDM }) {
             const statuses = entity.statuses || [];
             const flash = hpFlash[entity.id];
             const canEdit = canEditEntity(entity);
-            // Fix 1 : les joueurs ne voient pas les PV des ennemis
             const showHp = isDM || entity.type !== 'enemy';
 
-            /*
-              Fix layout — chaque entité est désormais une colonne (flex-direction: column).
-              Ligne 1 : nom (gauche) + boutons ✦ ✕ (droite)
-              Ligne 2 : barre HP + texte PV + CA + emoji + initiative
-              Ligne 3 : pill group [ input ][ + ][ − ] si le joueur peut éditer
-              Ligne 4 : badges de statuts
-            */
             return (
               <div
                 key={entity.id}
@@ -552,7 +583,7 @@ export default function CombatTracker({ sessionId, isDM }) {
                   </div>
                 </div>
 
-                {/* Ligne 2 — barre HP + texte PV + CA + type + initiative */}
+                {/* Ligne 2 — barre HP + texte PV + type + initiative (Fix 3 : CA supprimé) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                   <div className="hp-bar-container" style={{ width: '60px', height: '5px', flexShrink: 0 }}>
                     <div
@@ -561,31 +592,19 @@ export default function CombatTracker({ sessionId, isDM }) {
                     />
                   </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {/* PV masqués pour les ennemis côté joueur — le MJ voit toujours tout */}
                     {showHp ? `${entity.hp}/${hpMax} PV` : '??? PV'}
-                    {/* Flash vert (soins) ou rouge (dégâts) après application */}
                     {showHp && flash && (
                       <span style={{ color: flash.color, marginLeft: '4px', fontWeight: 700 }}>
                         {flash.text}
                       </span>
                     )}
                   </span>
-                  {entity.ac != null && (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                      🛡 {entity.ac}
-                    </span>
-                  )}
                   <span style={{ fontSize: '0.72rem', color: 'var(--accent-primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
                     {entity.type === 'enemy' ? '💀' : '🛡️'} {entity.initiative}
                   </span>
                 </div>
 
-                {/*
-                  Ligne 3 — Pill group [ input ][ + ][ − ] aligné à gauche
-                  Visible en permanence si le joueur peut éditer l'entité
-                  Même style pill group que précédemment (bordures partagées, coins arrondis extérieurs)
-                */}
-                {/* Input PV masqué pour les ennemis si le joueur ne peut pas voir leurs PV */}
+                {/* Ligne 3 — Pill group [ input ][ + ][ − ] */}
                 {canEdit && showHp && (
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <input
@@ -734,7 +753,6 @@ export default function CombatTracker({ sessionId, isDM }) {
       {isDM && (
         <div className="card" style={{ marginBottom: 'var(--space-md)' }}>
           {!showAddPanel ? (
-            // Bouton compact affiché par défaut : ouvre le panneau à deux sections
             <button className="btn btn-primary w-full" onClick={() => setShowAddPanel(true)}>
               + Ajouter un personnage
             </button>
@@ -770,9 +788,9 @@ export default function CombatTracker({ sessionId, isDM }) {
                     <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
                       {selectedCharacter.name}
                     </div>
+                    {/* Fix 3 : affichage CA supprimé — seuls les PV sont montrés */}
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
                       {selectedCharacter.hp_current ?? selectedCharacter.hp_max ?? '?'}/{selectedCharacter.hp_max ?? '?'} PV
-                      {' • '}CA {selectedCharacter.ac ?? '?'}
                     </div>
                     <div className="form-group" style={{ marginBottom: 'var(--space-sm)' }}>
                       <label style={{ fontSize: '0.78rem' }}>Initiative</label>
@@ -820,9 +838,9 @@ export default function CombatTracker({ sessionId, isDM }) {
                           }}
                         >
                           <span style={{ fontWeight: 600 }}>{char.name}</span>
+                          {/* Fix 3 : CA supprimé de la liste des fiches */}
                           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                             {char.hp_current ?? char.hp_max ?? '?'}/{char.hp_max ?? '?'} PV
-                            {' • '}CA {char.ac ?? '?'}
                             {alreadyIn && ' · Déjà présent'}
                           </span>
                         </button>
@@ -847,15 +865,37 @@ export default function CombatTracker({ sessionId, isDM }) {
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div className="form-group" style={{ flex: 1, minWidth: '100px', marginBottom: 0 }}>
                     <label>Nom</label>
-                    <input type="text" value={entityName} onChange={e => setEntityName(e.target.value)} placeholder="Gobelin…" />
+                    {/* Fix 2 : Entrée déclenche l'ajout — bordure rouge si champ vide */}
+                    <input
+                      type="text"
+                      value={entityName}
+                      onChange={e => setEntityName(e.target.value)}
+                      onKeyDown={handleEntityKeyDown}
+                      placeholder="Gobelin…"
+                      style={{ borderColor: entityErrors.name ? '#f87171' : undefined }}
+                    />
                   </div>
                   <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
                     <label>Init.</label>
-                    <input type="number" value={entityInit} onChange={e => setEntityInit(e.target.value)} placeholder="15" />
+                    <input
+                      type="number"
+                      value={entityInit}
+                      onChange={e => setEntityInit(e.target.value)}
+                      onKeyDown={handleEntityKeyDown}
+                      placeholder="15"
+                      style={{ borderColor: entityErrors.initiative ? '#f87171' : undefined }}
+                    />
                   </div>
                   <div className="form-group" style={{ width: '68px', marginBottom: 0 }}>
                     <label>PV</label>
-                    <input type="number" value={entityHP} onChange={e => setEntityHP(e.target.value)} placeholder="20" />
+                    <input
+                      type="number"
+                      value={entityHP}
+                      onChange={e => setEntityHP(e.target.value)}
+                      onKeyDown={handleEntityKeyDown}
+                      placeholder="20"
+                      style={{ borderColor: entityErrors.hp ? '#f87171' : undefined }}
+                    />
                   </div>
                   <div className="form-group" style={{ width: '110px', marginBottom: 0 }}>
                     <label>Type</label>
@@ -867,6 +907,20 @@ export default function CombatTracker({ sessionId, isDM }) {
                   </div>
                   <button className="btn btn-primary" onClick={addEntity} style={{ marginBottom: 0 }}>Ajouter</button>
                 </div>
+                {/* Fix 2 : messages d'erreur sous le formulaire entité manuelle */}
+                {(entityErrors.name || entityErrors.initiative || entityErrors.hp) && (
+                  <div style={{ marginTop: '6px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {entityErrors.name && (
+                      <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{entityErrors.name}</span>
+                    )}
+                    {entityErrors.initiative && (
+                      <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{entityErrors.initiative}</span>
+                    )}
+                    {entityErrors.hp && (
+                      <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{entityErrors.hp}</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Bouton Annuler — ferme le panneau et réinitialise tous les champs */}
@@ -886,9 +940,27 @@ export default function CombatTracker({ sessionId, isDM }) {
       {!isDM && (
         <div className="card">
           {!showJoin ? (
-            <button className="btn btn-primary w-full" onClick={() => setShowJoin(true)}>
-              ⚔️ Rejoindre le combat
-            </button>
+            // Fix 1 : joueur déjà présent — masquer le bouton rejoindre, proposer uniquement compagnon
+            alreadyInCombat ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                <div style={{
+                  textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)',
+                  padding: '8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
+                }}>
+                  ✓ Déjà dans le combat
+                </div>
+                <button
+                  className="btn btn-secondary w-full"
+                  onClick={() => { setJoinType('companion'); setShowJoin(true); }}
+                >
+                  🐾 Ajouter un compagnon
+                </button>
+              </div>
+            ) : (
+              <button className="btn btn-primary w-full" onClick={() => setShowJoin(true)}>
+                ⚔️ Rejoindre le combat
+              </button>
+            )
           ) : (
             <>
               <h4 style={{
@@ -898,60 +970,92 @@ export default function CombatTracker({ sessionId, isDM }) {
                 ⚔️ Rejoindre le combat
               </h4>
 
-              <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-sm)' }}>
-                {myCharacter && (
+              {/* Fix 1 : masquer l'option personnage si le joueur est déjà dans le combat */}
+              {!alreadyInCombat && (
+                <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-sm)' }}>
+                  {myCharacter && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                      <input type="radio" checked={joinType === 'character'} onChange={() => setJoinType('character')} />
+                      🛡️ {myCharacter.name}
+                    </label>
+                  )}
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                    <input type="radio" checked={joinType === 'character'} onChange={() => setJoinType('character')} />
-                    🛡️ {myCharacter.name}
+                    <input type="radio" checked={joinType === 'companion'} onChange={() => setJoinType('companion')} />
+                    🐾 Compagnon
                   </label>
-                )}
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                  <input type="radio" checked={joinType === 'companion'} onChange={() => setJoinType('companion')} />
-                  🐾 Compagnon
-                </label>
-              </div>
+                </div>
+              )}
 
-              {joinType === 'character' && myCharacter && (
+              {/* Fix 3 : affichage CA supprimé — seuls les PV sont montrés */}
+              {joinType === 'character' && myCharacter && !alreadyInCombat && (
                 <div style={{
                   fontSize: '0.78rem', color: 'var(--text-muted)',
                   marginBottom: 'var(--space-sm)', padding: '6px 8px',
                   background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
                 }}>
-                  PV {myCharacter.hp_current ?? myCharacter.hp_max ?? '?'}/{myCharacter.hp_max ?? '?'} • CA {myCharacter.ac ?? '?'}
+                  PV {myCharacter.hp_current ?? myCharacter.hp_max ?? '?'}/{myCharacter.hp_max ?? '?'}
                 </div>
               )}
 
+              {/* Fix 3 : champ CA supprimé du formulaire compagnon */}
               {joinType === 'companion' && (
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-sm)' }}>
+                  {/* Fix 2 : Entrée déclenche la soumission — bordure rouge si champ vide */}
                   <input
-                    type="text" placeholder="Nom du compagnon"
-                    value={joinName} onChange={e => setJoinName(e.target.value)}
-                    style={{ flex: 1, minWidth: '100px' }}
+                    type="text"
+                    placeholder="Nom du compagnon"
+                    value={joinName}
+                    onChange={e => setJoinName(e.target.value)}
+                    onKeyDown={handleJoinKeyDown}
+                    style={{ flex: 1, minWidth: '100px', borderColor: joinErrors.name ? '#f87171' : undefined }}
                   />
                   <input
-                    type="number" placeholder="PV act."
-                    value={joinHp} onChange={e => setJoinHp(e.target.value)}
+                    type="number"
+                    placeholder="PV act."
+                    value={joinHp}
+                    onChange={e => setJoinHp(e.target.value)}
+                    onKeyDown={handleJoinKeyDown}
+                    style={{ width: '64px', borderColor: joinErrors.hp ? '#f87171' : undefined }}
+                  />
+                  <input
+                    type="number"
+                    placeholder="PV max"
+                    value={joinHpMax}
+                    onChange={e => setJoinHpMax(e.target.value)}
+                    onKeyDown={handleJoinKeyDown}
                     style={{ width: '64px' }}
                   />
-                  <input
-                    type="number" placeholder="PV max"
-                    value={joinHpMax} onChange={e => setJoinHpMax(e.target.value)}
-                    style={{ width: '64px' }}
-                  />
-                  <input
-                    type="number" placeholder="CA"
-                    value={joinAc} onChange={e => setJoinAc(e.target.value)}
-                    style={{ width: '56px' }}
-                  />
+                </div>
+              )}
+
+              {/* Fix 2 : messages d'erreur pour les champs compagnon */}
+              {(joinErrors.name || joinErrors.hp) && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+                  {joinErrors.name && (
+                    <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{joinErrors.name}</span>
+                  )}
+                  {joinErrors.hp && (
+                    <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{joinErrors.hp}</span>
+                  )}
                 </div>
               )}
 
               <div className="form-group" style={{ marginBottom: 'var(--space-sm)' }}>
                 <label>Initiative</label>
+                {/* Fix 2 : Entrée déclenche la soumission — bordure rouge si champ vide */}
                 <input
-                  type="number" placeholder="Résultat de votre jet d'initiative"
-                  value={joinInit} onChange={e => setJoinInit(e.target.value)}
+                  type="number"
+                  placeholder="Résultat de votre jet d'initiative"
+                  value={joinInit}
+                  onChange={e => setJoinInit(e.target.value)}
+                  onKeyDown={handleJoinKeyDown}
+                  style={{ borderColor: joinErrors.initiative ? '#f87171' : undefined }}
                 />
+                {joinErrors.initiative && (
+                  <span style={{ color: '#f87171', fontSize: '0.72rem', display: 'block', marginTop: '2px' }}>
+                    {joinErrors.initiative}
+                  </span>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
@@ -963,7 +1067,8 @@ export default function CombatTracker({ sessionId, isDM }) {
                   onClick={() => {
                     setShowJoin(false);
                     setJoinType('character');
-                    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinHpMax(''); setJoinAc('');
+                    setJoinName(''); setJoinInit(''); setJoinHp(''); setJoinHpMax('');
+                    setJoinErrors({});
                   }}
                 >
                   Annuler
