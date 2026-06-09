@@ -1225,8 +1225,12 @@ export default function MapCanvas({ sessionId, isDM }) {
         return;
       }
       if (selectedTokenRef.current) {
+        const tok = selectedTokenRef.current;
+        // Bloquer silencieusement si le joueur n'est pas le créateur du token ni le MJ
+        const canDelete = isDMRef.current || !tok.createdBy || tok.createdBy === user?.id;
+        if (!canDelete) return;
         e.preventDefault();
-        setPendingDelete({ type: 'token', id: selectedTokenRef.current.id, name: selectedTokenRef.current.name });
+        setPendingDelete({ type: 'token', id: tok.id, name: tok.name });
         return;
       }
       // Suppression d'une forme sélectionnée — créateur ou MJ uniquement
