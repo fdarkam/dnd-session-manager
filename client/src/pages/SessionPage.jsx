@@ -127,9 +127,9 @@ export default function SessionPage({ sessionId, onBack }) {
 
   const isDM = session.dm_id === user.id;
 
+  // Fix 1 : onglet Quêtes masqué de la navigation — le composant reste monté (listeners socket actifs)
   const tabs = [
     { id: 'characters', icon: '📜', label: 'Personnages' },
-    { id: 'quests', icon: '🎯', label: 'Quêtes' },
     { id: 'map', icon: '🗺️', label: 'Map' },
     { id: 'wiki', icon: '📖', label: 'Wiki' },
     { id: 'logs', icon: '📋', label: 'Logs' },

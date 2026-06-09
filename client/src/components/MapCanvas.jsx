@@ -443,6 +443,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const livePathsRef = useRef({});   // other users' in-progress strokes { pathId: {color,width,points[]} }
   const currentPathRef = useRef([]);
   const currentPathIdRef = useRef(null); // id shared with finalized path
+  // Fix 2 : selectedTokenRef est local à ce client — il ne doit JAMAIS être broadcasté via socket
   const selectedTokenRef = useRef(null);
   const panOffsetRef = useRef({ x: 0, y: 0 });
   const zoomRef = useRef(1);
@@ -2312,6 +2313,7 @@ export default function MapCanvas({ sessionId, isDM }) {
                     // Pas de overflow:hidden ici — le box-shadow doit déborder du cercle
                     opacity: inFog ? 0 : (t.hidden ? 0.5 : 1),
                     // Anneau de bordure + halo de sélection en CSS (toujours au-dessus du canvas)
+                    // Fix 2 : le glow utilise selectedToken (state React local) — jamais visible par les autres clients
                     boxShadow: t.id === selectedToken?.id
                       ? `0 0 0 2px #facc15, 0 0 0 8px rgba(250,204,21,0.35)`
                       : `0 0 0 2px ${t.borderColor || '#fff'}`,
@@ -2331,8 +2333,8 @@ export default function MapCanvas({ sessionId, isDM }) {
                   {t.locked && (
                     <span style={{ position: 'absolute', top: '6%', right: '6%', fontSize: `${Math.max(8, Math.round(r * 0.3))}px`, lineHeight: 1, userSelect: 'none' }}>🔒</span>
                   )}
-                  {/* Handle de redimensionnement (coin bas-droite, hors du cercle) */}
-                  {t.id === selectedToken?.id && !t.locked && (
+                  {/* Fix 2 : poignée de resize visible uniquement si sélectionné localement ET si le client peut modifier le token (créateur ou MJ) */}
+                  {t.id === selectedToken?.id && !t.locked && (isDM || !t.createdBy || t.createdBy === user?.id) && (
                     <div style={{ position: 'absolute', left: r * 1.707 - 5, top: r * 1.707 - 5, width: 10, height: 10, borderRadius: '50%', background: '#facc15', border: '2px solid #000', zIndex: 1 }} />
                   )}
                 </div>
