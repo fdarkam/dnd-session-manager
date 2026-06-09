@@ -1920,41 +1920,6 @@ export default function MapCanvas({ sessionId, isDM }) {
         });
       }
     }
-    // Simple clic (sans drag) → détection double clic : panel si propriétaire, sinon tooltip créateur
-    if (wasDragging && !dragMoved.current) {
-      const now = Date.now();
-      const last = tokenLastClickRef.current;
-      if (last.id === wasDragging.id && (now - last.time) < 350) {
-        const tok = tokensRef.current.find(t => t.id === wasDragging.id);
-        if (tok) {
-          const canManageTok = isDM || !tok.createdBy || tok.createdBy === user?.id;
-          const z = zoomRef.current;
-          const pan = panOffsetRef.current;
-          const r = clamp(tok.radius || 22, 10, 120);
-          if (canManageTok) {
-            // MJ ou créateur du token : ouvrir le panneau d'édition
-            const panelW = 248;
-            const contW = containerRef.current?.clientWidth || 600;
-            const contH = containerRef.current?.clientHeight || 400;
-            const tokSx = tok.x * z + pan.x;
-            const tokSy = tok.y * z + pan.y;
-            const sx = (tokSx + r + 12 + panelW < contW) ? tokSx + r + 12 : Math.max(8, tokSx - r - panelW - 12);
-            const sy = Math.max(8, Math.min(contH - 280, tokSy - r));
-            setTokenEditPos({ x: Math.max(8, sx), y: sy });
-            setShowTokenEdit(true);
-          } else {
-            // Joueur non-propriétaire : afficher tooltip "Créé par X" pendant 2 secondes
-            setTokenTooltip({
-              x: tok.x * z + pan.x,
-              y: tok.y * z + pan.y,
-              createdBy: tok.createdByName || tok.createdBy || '?',
-            });
-            setTimeout(() => setTokenTooltip(null), 2000);
-          }
-        }
-      }
-      tokenLastClickRef.current = { id: wasDragging.id, time: now };
-    }
     if (wasPanning) setPanOffset({ ...panOffsetRef.current }); // sync state once after pan (deferred from mousemove)
     setDrawing(false); setIsPanning(false); setDragging(null); drawFrame();
   };
@@ -1971,6 +1936,55 @@ export default function MapCanvas({ sessionId, isDM }) {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [drawFrame]);
+
+  // ─── Double-clic : panel d'édition (propriétaire/MJ) ou tooltip créateur ────
+  // Utilise l'événement natif dblclick plutôt qu'une détection temporelle dans
+  // mouseUp, car les tokens non-gérables ne passent jamais dans isDraggingRef
+  // (handleMouseDown n'assigne le ref que si canManage est vrai).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onDblClick = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const pan = panOffsetRef.current, z = zoomRef.current;
+      // Convertir les coordonnées écran en coordonnées monde (pan + zoom)
+      const worldX = (e.clientX - rect.left - pan.x) / z;
+      const worldY = (e.clientY - rect.top - pan.y) / z;
+      // Trouver le token sous le curseur (même rayon+tolérance que handleMouseDown)
+      const tok = tokensRef.current.find(t => {
+        if (t.hidden && !isDMRef.current) return false;
+        const r = clamp(t.radius || 22, 10, 120);
+        const dx = t.x - worldX, dy = t.y - worldY;
+        return dx * dx + dy * dy <= (r + 5) ** 2;
+      });
+      if (!tok) return;
+      const canManageTok = isDMRef.current || !tok.createdBy || tok.createdBy === user?.id;
+      if (canManageTok) {
+        // MJ ou créateur du token : ouvrir le panneau d'édition
+        const r = clamp(tok.radius || 22, 10, 120);
+        const panelW = 248;
+        const contW = containerRef.current?.clientWidth || 600;
+        const contH = containerRef.current?.clientHeight || 400;
+        const tokSx = tok.x * z + pan.x;
+        const tokSy = tok.y * z + pan.y;
+        const sx = (tokSx + r + 12 + panelW < contW) ? tokSx + r + 12 : Math.max(8, tokSx - r - panelW - 12);
+        const sy = Math.max(8, Math.min(contH - 280, tokSy - r));
+        setTokenEditPos({ x: Math.max(8, sx), y: sy });
+        setShowTokenEdit(true);
+      } else {
+        // Autre joueur : tooltip "Créé par X" pendant 2 secondes
+        // Coordonnées écran relatives au container pour l'absolute positioning
+        setTokenTooltip({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          createdBy: tok.createdByName || tok.created_by_username || tok.createdBy || '?',
+        });
+        setTimeout(() => setTokenTooltip(null), 2000);
+      }
+    };
+    canvas.addEventListener('dblclick', onDblClick);
+    return () => canvas.removeEventListener('dblclick', onDblClick);
+  }, [user]); // user.id nécessaire pour la vérification de propriété ; tout le reste vient de refs
 
   const updateToken = (upd) => {
     const next = tokensRef.current.map(t => t.id === upd.id ? upd : t);
