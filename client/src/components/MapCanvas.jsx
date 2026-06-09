@@ -346,29 +346,22 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
             </div>
           </>
         )}
-        {/* Sélecteur Vision compact : boutons colorés sur une ligne, sans débordement */}
-        {canEdit && (
+        {/* Sélecteur Vision — réservé au MJ uniquement, entièrement masqué pour les joueurs */}
+        {isDM && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
             <span style={{ fontSize: '11px', color: '#aaa', flexShrink: 0 }}>Vision :</span>
             <div style={{ display: 'flex', gap: '3px', flex: 1 }}>
-              {/* Aveugle : MJ uniquement — le joueur ne peut pas lever cette restriction */}
-              {isDM && (
-                <button
-                  onClick={() => updateVision(0)}
-                  style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 0 ? '#c0392b' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
-                >🚫 Aveugle</button>
-              )}
-              {/* Normal — désactivé pour les joueurs si le MJ a posé Aveugle */}
+              <button
+                onClick={() => updateVision(0)}
+                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 0 ? '#c0392b' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
+              >🚫 Aveugle</button>
               <button
                 onClick={() => updateVision('normal')}
-                disabled={visionRadius === 0 && !isDM}
-                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'normal' ? '#2d6a4f' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: '#fff', opacity: visionRadius === 0 && !isDM ? 0.4 : 1 }}
+                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'normal' ? '#2d6a4f' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
               >Normal</button>
-              {/* Étendu — désactivé pour les joueurs si le MJ a posé Aveugle */}
               <button
                 onClick={() => updateVision('enhanced')}
-                disabled={visionRadius === 0 && !isDM}
-                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'enhanced' ? '#1a4a8a' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: visionRadius === 0 && !isDM ? 'not-allowed' : 'pointer', color: '#fff', opacity: visionRadius === 0 && !isDM ? 0.4 : 1 }}
+                style={{ flex: 1, fontSize: '11px', padding: '4px 2px', background: visionRadius === 'enhanced' ? '#1a4a8a' : 'transparent', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
               >Étendu</button>
             </div>
           </div>
