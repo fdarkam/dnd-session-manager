@@ -22,9 +22,10 @@ import { getClickedHandle, hitTestShape } from './geometry';
 import FloatingPanel from '../common/FloatingPanel';
 import TokenInfoPanel from './TokenInfoPanel';
 import TokenEditPanel from './TokenEditPanel';
-import { lerp, clamp, VISION_NORMAL, VISION_ENHANCED } from './mapConstants';
+import { clamp, VISION_NORMAL, VISION_ENHANCED } from './mapConstants';
 import { useMapRefs } from './hooks/useMapRefs';
 import { useMapSocket } from './hooks/useMapSocket';
+import { useLerpAnimation } from './hooks/useLerpAnimation';
 import { useDrawFrame } from './drawing/drawFrame';
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -39,39 +40,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const drawFrame = useDrawFrame({ canvasRef, containerRef, cursorCanvasRef, panOffsetRef, zoomRef, gridSizeRef, mapImageRef, isDMRef, fogCellsRef, tokenWorldRef, mapWorldRef, mapImgElemRef, imgXRef, imgYRef, imgScaleRef, toolRef, showGridRef, pathsRef, livePathsRef, currentPathRef, drawColorRef, drawWidthRef, fogColorRef, fogOpacityRef, shapesRef, selectedShapeRef, currentShapeRef, tokensRef, tokenVisualsRef, pingAnimRef, otherCursorsRef, cursorVisualsRef });
 
   // ─── Token interpolation loop ─────────────────────────────────────────────
-  const startLerpAnimation = useCallback(() => {
-    if (lerpAnimRef.current) return;
-    const animate = () => {
-      const now = Date.now();
-      let active = false;
-      Object.entries(tokenLerpsRef.current).forEach(([id, tgt]) => {
-        const t = Math.min((now - tgt.startTime) / tgt.duration, 1);
-        tokenVisualsRef.current[id] = { x: lerp(tgt.fromX, tgt.toX, t), y: lerp(tgt.fromY, tgt.toY, t) };
-        if (t < 1) active = true;
-        else delete tokenLerpsRef.current[id];
-      });
-      // Cursor lerp — same pattern as tokens
-      Object.entries(cursorLerpsRef.current).forEach(([uid, tgt]) => {
-        const t = Math.min((now - tgt.startTime) / tgt.duration, 1);
-        cursorVisualsRef.current[uid] = { x: lerp(tgt.fromX, tgt.toX, t), y: lerp(tgt.fromY, tgt.toY, t) };
-        if (t < 1) active = true;
-        else delete cursorLerpsRef.current[uid];
-      });
-      // Sync token overlay div positions (impératif, sans re-render React)
-      Object.entries(tokenVisualsRef.current).forEach(([id, vis]) => {
-        const el = tokenDivsRef.current[id];
-        if (!el) return;
-        const tok = tokensRef.current.find(t => t.id === id);
-        if (!tok) return;
-        const r = clamp(tok.radius || 22, 10, 120);
-        el.style.left = `${vis.x - r}px`;
-        el.style.top = `${vis.y - r}px`;
-      });
-      drawFrame();
-      lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
-    };
-    lerpAnimRef.current = requestAnimationFrame(animate);
-  }, [drawFrame]);
+  const startLerpAnimation = useLerpAnimation({ refs, drawFrame });
 
   // ─── ResizeObserver: initial draw when container gets its size ───────────
   useEffect(() => {
