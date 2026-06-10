@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet, apiPost, apiPut } from '../api/client';
 
 const ALL_STATUSES = [
   'Empoisonné', 'Étourdi', 'Concentré', 'Charmé', 'Effrayé',
@@ -72,9 +73,7 @@ export default function CombatTracker({ sessionId, isDM }) {
   // Charge toutes les fiches de la session.
   useEffect(() => {
     if (!sessionId) return;
-    fetch(`${API}/characters/session/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    apiGet(`/characters/session/${sessionId}`)
       .then(r => (r.ok ? r.json() : []))
       .then(data => {
         if (Array.isArray(data)) {
@@ -104,11 +103,7 @@ export default function CombatTracker({ sessionId, isDM }) {
       );
       const updated = { ...prev, entities };
       setEncounter(updated);
-      fetch(`${API}/combat/${updated.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entities: updated.entities, current_turn: updated.current_turn, round: updated.round }),
-      }).catch(() => {});
+      apiPut(`/combat/${updated.id}`, { entities: updated.entities, current_turn: updated.current_turn, round: updated.round }).catch(() => {});
       socket.emit('combat-update', { sessionId, encounter: updated });
     };
 
@@ -132,9 +127,7 @@ export default function CombatTracker({ sessionId, isDM }) {
   }, [statusOpen]);
 
   const fetchEncounter = async () => {
-    const res = await fetch(`${API}/combat/session/${sessionId}/active`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await apiGet(`/combat/session/${sessionId}/active`);
     if (res.ok) {
       const data = await res.json();
       if (data?.entities && typeof data.entities === 'string')
@@ -147,20 +140,12 @@ export default function CombatTracker({ sessionId, isDM }) {
     isDM || entity.addedBy === user?.id || entity.userId === user?.id;
 
   const broadcastUpdate = (enc) => {
-    fetch(`${API}/combat/${enc.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ entities: enc.entities, current_turn: enc.current_turn, round: enc.round }),
-    });
+    apiPut(`/combat/${enc.id}`, { entities: enc.entities, current_turn: enc.current_turn, round: enc.round });
     if (socket) socket.emit('combat-update', { sessionId, encounter: enc });
   };
 
   const createEncounter = async () => {
-    const res = await fetch(`${API}/combat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, name: newName || 'Combat' }),
-    });
+    const res = await apiPost('/combat', { session_id: sessionId, name: newName || 'Combat' });
     if (res.ok) {
       const data = await res.json();
       if (data.entities && typeof data.entities === 'string') data.entities = JSON.parse(data.entities);
@@ -431,11 +416,7 @@ export default function CombatTracker({ sessionId, isDM }) {
 
   const endCombat = async () => {
     if (!encounter) return;
-    await fetch(`${API}/combat/${encounter.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ is_active: false }),
-    });
+    await apiPut(`/combat/${encounter.id}`, { is_active: false });
     setEncounter(null);
     if (socket) socket.emit('combat-update', { sessionId, encounter: null });
   };

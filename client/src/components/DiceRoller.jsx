@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet } from '../api/client';
 import { parseDice } from '../utils/dice';
 
 // La logique son (audioCtxRef, SOUND_FILES, fonctions procédurales, playDiceSound)
@@ -9,7 +10,7 @@ import { parseDice } from '../utils/dice';
 
 export default function DiceRoller({ sessionId }) {
   const socket = useSocket();
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const storageKey = `dice_expr_${sessionId}`;
   const [expression, setExpression] = useState(() => sessionStorage.getItem(storageKey) || '1d20');
   const [history, setHistory] = useState([]);
@@ -21,9 +22,7 @@ export default function DiceRoller({ sessionId }) {
 
   useEffect(() => {
     // Chargement de l'historique au montage
-    fetch(`${API}/dice/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    apiGet(`/dice/${sessionId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setHistory(data));
   }, [sessionId]);

@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api/client';
 
 export default function QuestTracker({ sessionId, isDM }) {
-  const { token } = useAuth();
   const [quests, setQuests] = useState([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -14,31 +13,23 @@ export default function QuestTracker({ sessionId, isDM }) {
   useEffect(() => { fetchQuests(); }, [sessionId]);
 
   const fetchQuests = async () => {
-    const res = await fetch(`${API}/quests/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiGet(`/quests/session/${sessionId}`);
     if (res.ok) setQuests(await res.json());
   };
 
   const createQuest = async () => {
     if (!title.trim()) return;
-    const res = await fetch(`${API}/quests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, title, description, is_private: isPrivate })
-    });
+    const res = await apiPost('/quests', { session_id: sessionId, title, description, is_private: isPrivate });
     if (res.ok) { setTitle(''); setDescription(''); setIsPrivate(false); fetchQuests(); }
   };
 
   const updateQuest = async (id, data) => {
-    const res = await fetch(`${API}/quests/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(data)
-    });
+    const res = await apiPut(`/quests/${id}`, data);
     if (res.ok) { setEditingId(null); fetchQuests(); }
   };
 
   const deleteQuest = async (id) => {
-    const res = await fetch(`${API}/quests/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiDelete(`/quests/${id}`);
     if (res.ok) fetchQuests();
   };
 

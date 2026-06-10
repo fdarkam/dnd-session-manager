@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAuth, API } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { apiGet, apiPost } from '../../api/client';
 import { useDraggable } from '../../hooks/useDraggable';
 import { CONDITIONS } from '../../domain/conditions';
 
@@ -46,7 +47,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
   // Charger les personnages de la session pour le lien token↔combat (MJ uniquement)
   useEffect(() => {
     if (!isDM || !sessionId) return;
-    fetch(`${API}/sessions/${sessionId}/characters`, { headers: { Authorization: `Bearer ${authToken}` } })
+    apiGet(`/sessions/${sessionId}/characters`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setCharacters(Array.isArray(data) ? data : []))
       .catch(() => setCharacters([]));
@@ -62,7 +63,7 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
     setUploading(true);
     try {
       const fd = new FormData(); fd.append('image', f);
-      const res = await fetch(`${API}/maps/token-image`, { method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd });
+      const res = await apiPost('/maps/token-image', fd);
       if (res.ok) { const data = await res.json(); setImage(`${VITE_API}${data.path}`); }
     } catch { /* ignore */ }
     setUploading(false);

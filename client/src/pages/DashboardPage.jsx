@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet, apiPost, apiDelete } from '../api/client';
 import ProfileModal from '../components/ProfileModal';
 
 export default function DashboardPage({ onJoinSession }) {
-  const { user, token, logout } = useAuth();
+  const { user, logout } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -18,9 +19,7 @@ export default function DashboardPage({ onJoinSession }) {
   }, []);
 
   const fetchSessions = async () => {
-    const res = await fetch(`${API}/sessions`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet('/sessions');
     if (res.ok) setSessions(await res.json());
   };
 
@@ -28,11 +27,7 @@ export default function DashboardPage({ onJoinSession }) {
     e.preventDefault();
     setError('');
     try {
-      const res = await fetch(`${API}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, description })
-      });
+      const res = await apiPost('/sessions', { name, description });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setShowCreate(false);
@@ -48,11 +43,7 @@ export default function DashboardPage({ onJoinSession }) {
     e.preventDefault();
     setError('');
     try {
-      const res = await fetch(`${API}/sessions/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ code: joinCode })
-      });
+      const res = await apiPost('/sessions/join', { code: joinCode });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setShowJoin(false);
@@ -65,10 +56,7 @@ export default function DashboardPage({ onJoinSession }) {
 
   const deleteSession = async (id) => {
     if (!confirm('Supprimer cette session ?')) return;
-    await fetch(`${API}/sessions/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    await apiDelete(`/sessions/${id}`);
     fetchSessions();
   };
 

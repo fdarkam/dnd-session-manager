@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { API } from '../../../contexts/AuthContext';
+import { apiGet, apiPost, apiDelete } from '../../../api/client';
 
 // ─── Map CRUD ───────────────────────────────────────────────────────────────
 // fetchMaps / uploadMap / deleteCurrentMap / confirmDeleteMap / switchMap
@@ -12,7 +12,7 @@ export function useMapData({ refs, setters, socket, sessionId, token, isDM }) {
   const { setMaps, setActiveMap, setShowDeleteConfirm } = setters;
 
   const fetchMaps = useCallback(async () => {
-    const res = await fetch(`${API}/maps/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiGet(`/maps/session/${sessionId}`);
     if (res.ok) {
       const data = await res.json(); setMaps(data);
       if (!activeMapRef.current || !data.find(m => m.id === activeMapRef.current.id)) {
@@ -28,7 +28,7 @@ export function useMapData({ refs, setters, socket, sessionId, token, isDM }) {
   const uploadMap = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     const fd = new FormData(); fd.append('image', f); fd.append('session_id', sessionId); fd.append('name', f.name.replace(/\.[^.]+$/, ''));
-    const res = await fetch(`${API}/maps`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+    const res = await apiPost('/maps', fd);
     if (res.ok) {
       const newMap = await res.json();
       fetchMaps(); // rafraîchir la liste locale
@@ -49,7 +49,7 @@ export function useMapData({ refs, setters, socket, sessionId, token, isDM }) {
     setShowDeleteConfirm(false);
     const mapId = activeMapRef.current?.id;
     if (!mapId) return;
-    const res = await fetch(`${API}/maps/${mapId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiDelete(`/maps/${mapId}`);
     if (res.ok) {
       if (socket) socket.emit('map-delete', { sessionId, mapId });
       fetchMaps();

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api/client';
 import { useSocket } from '../contexts/SocketContext';
 
 export default function CharacterSheet({ sessionId, isDM, members = [], onlineUsers = new Set() }) {
@@ -74,9 +75,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
   }, [socket]);
 
   const fetchCharacters = async () => {
-    const res = await fetch(`${API}/characters/session/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet(`/characters/session/${sessionId}`);
     if (res.ok) {
       const data = await res.json();
       setCharacters(data);
@@ -85,11 +84,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
   };
 
   const createCharacter = async () => {
-    const res = await fetch(`${API}/characters`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId })
-    });
+    const res = await apiPost('/characters', { session_id: sessionId });
     if (res.ok) {
       const char = await res.json();
       setCharacters(prev => [...prev, char]);
@@ -102,11 +97,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     setSaving(true);
     saveTimeout.current = setTimeout(async () => {
       try {
-        await fetch(`${API}/characters/${char.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(char)
-        });
+        await apiPut(`/characters/${char.id}`, char);
       } catch (err) {
         console.error('Auto-save error:', err);
       }
@@ -130,9 +121,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
 
   const exportCharacter = async () => {
     if (!selected) return;
-    const res = await fetch(`${API}/characters/${selected.id}/export`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet(`/characters/${selected.id}/export`);
     if (res.ok) {
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -151,11 +140,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     const text = await file.text();
     try {
       const data = JSON.parse(text);
-      const res = await fetch(`${API}/characters/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, character_data: data })
-      });
+      const res = await apiPost('/characters/import', { session_id: sessionId, character_data: data });
       if (res.ok) fetchCharacters();
     } catch (err) {
       alert('Fichier JSON invalide');
@@ -173,11 +158,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
       const formData = new FormData();
       formData.append('pdf', file);
       formData.append('session_id', sessionId);
-      const res = await fetch(`${API}/characters/import-pdf`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
+      const res = await apiPost('/characters/import-pdf', formData);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setPdfMessage(data.message || 'PDF importé !');
@@ -193,9 +174,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
 
   // ---- Transfer to another session ----
   const openTransferModal = async () => {
-    const res = await fetch(`${API}/sessions`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet('/sessions');
     if (res.ok) {
       const sessions = await res.json();
       // Filter out current session
@@ -208,11 +187,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
     if (!selected) return;
     setTransferring(true);
     try {
-      const res = await fetch(`${API}/characters/${selected.id}/transfer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ target_session_id: targetSessionId })
-      });
+      const res = await apiPost(`/characters/${selected.id}/transfer`, { target_session_id: targetSessionId });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       alert(data.message || 'Personnage transféré !');
@@ -231,10 +206,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
 
   const confirmDeleteCharacter = async () => {
     if (!pendingDeleteChar) return;
-    await fetch(`${API}/characters/${pendingDeleteChar.id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    await apiDelete(`/characters/${pendingDeleteChar.id}`);
     // Le retrait local est géré par le listener character-deleted via socket
     setPendingDeleteChar(null);
   };
@@ -242,11 +214,7 @@ export default function CharacterSheet({ sessionId, isDM, members = [], onlineUs
   const assignCharacter = async (userId) => {
     if (!selected) return;
     setAssignMsg('');
-    const res = await fetch(`${API}/characters/${selected.id}/assign`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ assigned_user_id: userId || null })
-    });
+    const res = await apiPut(`/characters/${selected.id}/assign`, { assigned_user_id: userId || null });
     const data = await res.json();
     if (!res.ok) {
       setAssignMsg('❌ ' + data.error);

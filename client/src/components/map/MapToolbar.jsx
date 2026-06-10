@@ -1,5 +1,5 @@
 import { clamp } from './mapConstants';
-import { API } from '../../contexts/AuthContext';
+import { apiPost } from '../../api/client';
 const VITE_API = import.meta.env.VITE_API_URL;
 
 // ─── Map toolbar ───────────────────────────────────────────────────────────
@@ -8,7 +8,7 @@ const VITE_API = import.meta.env.VITE_API_URL;
 // contexte (isDM/socket/sessionId/user/token) et les handlers dérivés de
 // MapCanvas. dmTools (dérivé pur de isDM) vit ici car utilisé uniquement ici.
 // Aucune logique modifiée.
-export default function MapToolbar({ state, setters, refs, isDM, socket, sessionId, user, token, drawFrame, resetImgTransform, clearFog, updateSelectedShape, deleteSelectedShape, uploadMap, deleteCurrentMap, switchMap, saveMapName }) {
+export default function MapToolbar({ state, setters, refs, isDM, socket, sessionId, user, drawFrame, resetImgTransform, clearFog, updateSelectedShape, deleteSelectedShape, uploadMap, deleteCurrentMap, switchMap, saveMapName }) {
   const { tool, drawColor, drawWidth, eraserSize, fogBrushPx, fogColor, fogCells, fogOpacity, selectedShape, shapeType, shapeColor, shapeWidth, shapeFilled, shapeOpacity, newShapeName, newTokenName, newTokenColor, newTokenBorderColor, newTokenRadius, newTokenImage, newTokenHidden, showGrid, gridSize, showCombat, showDice, maps, activeMap, editingMapName, zoom } = state;
   const { setTool, setDrawColor, setDrawWidth, setPaths, setEraserSize, setFogBrushPx, setFogColor, setFogOpacity, setSelectedShape, setShapeType, setNewShapeName, setShapeColor, setShapeWidth, setShapeFilled, setShapeOpacity, setNewTokenName, setNewTokenColor, setNewTokenBorderColor, setNewTokenRadius, setNewTokenImage, setNewTokenHidden, setShowGrid, setGridSize, setShowCombat, setShowDice, setEditingMapName } = setters;
   const { pathsRef, activeMapRef, fogBrushPxRef, fogOpacityRef, selectedShapeRef, shapeTypeRef, shapeColorRef, shapeWidthRef, shapeFilledRef, shapeOpacityRef, newTokenFileRef, showGridRef, gridSizeRef } = refs;
@@ -164,7 +164,7 @@ export default function MapToolbar({ state, setters, refs, isDM, socket, session
               onChange={async e => {
                 const f = e.target.files[0]; if (!f) return;
                 const fd = new FormData(); fd.append('image', f);
-                const res = await fetch(`${API}/maps/token-image`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+                const res = await apiPost('/maps/token-image', fd);
                 if (res.ok) { const d = await res.json(); setNewTokenImage(`${VITE_API}${d.path}`); }
                 else { const e = await res.json().catch(() => ({})); alert(`Erreur upload image (${res.status}): ${e.error || 'inconnue'}`); }
               }} style={{ display: 'none' }} />

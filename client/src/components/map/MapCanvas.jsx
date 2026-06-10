@@ -288,7 +288,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       {/* Toolbar */}
       <MapToolbar
         state={state} setters={setters} refs={refs}
-        isDM={isDM} socket={socket} sessionId={sessionId} user={user} token={token}
+        isDM={isDM} socket={socket} sessionId={sessionId} user={user}
         drawFrame={drawFrame} resetImgTransform={resetImgTransform} clearFog={clearFog}
         updateSelectedShape={updateSelectedShape} deleteSelectedShape={deleteSelectedShape}
         uploadMap={uploadMap} deleteCurrentMap={deleteCurrentMap} switchMap={switchMap} saveMapName={saveMapName}

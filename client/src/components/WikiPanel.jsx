@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api/client';
 import { useSocket } from '../contexts/SocketContext';
 
 const CATEGORIES = [
@@ -11,7 +11,6 @@ const CATEGORIES = [
 ];
 
 export default function WikiPanel({ sessionId, isDM }) {
-  const { token } = useAuth();
   const socket = useSocket();
   const [pages, setPages] = useState([]);
   const [selectedCat, setSelectedCat] = useState('Général');
@@ -39,32 +38,24 @@ export default function WikiPanel({ sessionId, isDM }) {
   }, [socket]);
 
   const fetchPages = async () => {
-    const res = await fetch(`${API}/wiki/session/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiGet(`/wiki/session/${sessionId}`);
     if (res.ok) { const data = await res.json(); setPages(data); }
   };
 
   const createPage = async () => {
     if (!newTitle.trim()) return;
-    const res = await fetch(`${API}/wiki`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, title: newTitle, category: newCat, content: '' })
-    });
+    const res = await apiPost('/wiki', { session_id: sessionId, title: newTitle, category: newCat, content: '' });
     if (res.ok) { const page = await res.json(); setNewTitle(''); fetchPages(); setSelectedCat(newCat); setSelectedPage(page); setEditing(true); setEditContent(''); }
   };
 
   const savePage = async () => {
     if (!selectedPage) return;
-    const res = await fetch(`${API}/wiki/${selectedPage.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ content: editContent })
-    });
+    const res = await apiPut(`/wiki/${selectedPage.id}`, { content: editContent });
     if (res.ok) { const updated = await res.json(); setSelectedPage(updated); setEditing(false); fetchPages(); }
   };
 
   const deletePage = async (id) => {
-    const res = await fetch(`${API}/wiki/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiDelete(`/wiki/${id}`);
     if (res.ok) { if (selectedPage?.id === id) { setSelectedPage(null); setEditing(false); } fetchPages(); }
   };
 

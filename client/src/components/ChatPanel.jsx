@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet } from '../api/client';
 import { parseDice, rollFromExpr } from '../utils/dice';
 import { formatDate } from '../utils/date';
 
@@ -20,9 +21,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
 
   // Chargement de l'historique au montage
   useEffect(() => {
-    fetch(`${API}/chat/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    apiGet(`/chat/${sessionId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setMessages(data));
   }, [sessionId]);
@@ -39,7 +38,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
   useEffect(() => {
     if (!socket) return;
     const handler = () => {
-      fetch(`${API}/chat/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+      apiGet(`/chat/${sessionId}`)
         .then(r => r.ok ? r.json() : null)
         .then(data => { if (data) setMessages(data); });
     };
@@ -53,7 +52,7 @@ export default function ChatPanel({ sessionId, isDM = false, members = [], onlin
     const aDejaConnecte = { current: socket.connected };
     const onConnect = () => {
       if (aDejaConnecte.current) {
-        fetch(`${API}/chat/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+        apiGet(`/chat/${sessionId}`)
           .then(r => r.ok ? r.json() : null)
           .then(data => { if (data) setMessages(data); });
       }

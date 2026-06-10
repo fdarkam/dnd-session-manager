@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet } from '../api/client';
 import { useSocket, useSocketContext } from '../contexts/SocketContext';
 import CharacterSheet from '../components/CharacterSheet';
 import ChatPanel from '../components/ChatPanel';
@@ -11,7 +12,7 @@ import WikiPanel from '../components/WikiPanel';
 import ProfileModal from '../components/ProfileModal';
 
 export default function SessionPage({ sessionId, onBack }) {
-  const { user, token, logout, patchUsername } = useAuth();
+  const { user, logout, patchUsername } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
   const [showChat, setShowChat] = useState(true);
   const socket = useSocket();
@@ -94,9 +95,7 @@ export default function SessionPage({ sessionId, onBack }) {
   }, [socket, sessionId]);
 
   const fetchSession = async () => {
-    const res = await fetch(`${API}/sessions/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet(`/sessions/${sessionId}`);
     if (res.ok) {
       setSession(await res.json());
     }

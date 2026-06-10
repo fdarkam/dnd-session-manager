@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { apiGet } from '../api/client';
 import { useSocket } from '../contexts/SocketContext';
 import { formatDate } from '../utils/date';
 
 export default function ActionLog({ sessionId }) {
-  const { token } = useAuth();
   const socket = useSocket();
   const [logs, setLogs] = useState([]);
 
@@ -22,9 +21,7 @@ export default function ActionLog({ sessionId }) {
   }, [socket, sessionId]);
 
   const fetchLogs = async () => {
-    const res = await fetch(`${API}/logs/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiGet(`/logs/${sessionId}`);
     if (res.ok) setLogs(await res.json());
   };
 

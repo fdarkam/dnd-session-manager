@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { apiGet, apiPut } from '../api/client';
 
 const API = `${import.meta.env.VITE_API_URL}/api`;
 
@@ -11,9 +12,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (token) {
-      fetch(`${API}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      apiGet('/auth/me')
         .then(r => r.ok ? r.json() : Promise.reject())
         .then(data => { setUser(data); setLoading(false); })
         .catch(() => { logout(); setLoading(false); });
@@ -57,11 +56,7 @@ export function AuthProvider({ children }) {
   };
 
   const updateProfile = async (username) => {
-    const res = await fetch(`${API}/auth/profile`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ username })
-    });
+    const res = await apiPut('/auth/profile', { username });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     localStorage.setItem('dnd-token', data.token);
@@ -71,11 +66,7 @@ export function AuthProvider({ children }) {
   };
 
   const updatePassword = async (current, newPassword) => {
-    const res = await fetch(`${API}/auth/password`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ current, newPassword })
-    });
+    const res = await apiPut('/auth/password', { current, newPassword });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     return data;
