@@ -295,6 +295,21 @@ export function setupSocket(io) {
       socket.to(sessionId).emit('map-shape-deleted', { mapId, shapeId });
     });
 
+    // ---- Formes de sorts : mise à jour (déplacement, resize, propriétés) ----
+    // live:true = geste en cours (broadcast only, pas de DB) ; live:false = état final (DB write).
+    socket.on('map-shape-update', (data) => {
+      const { sessionId, mapId, shape, live } = data;
+      if (!isMember(sessionId, socket.user.id)) return;
+      if (!live) {
+        try {
+          const map = db.prepare('SELECT shapes FROM maps WHERE id = ?').get(mapId);
+          const shapes = JSON.parse(map?.shapes || '[]').map(s => s.id === shape.id ? shape : s);
+          db.prepare('UPDATE maps SET shapes = ? WHERE id = ?').run(JSON.stringify(shapes), mapId);
+        } catch (err) { console.error('DB shape-update error:', err); }
+      }
+      socket.to(sessionId).emit('map-shape-updated', { mapId, shape });
+    });
+
     // ---- Dessin : segment live (pas de DB — broadcast only) ----
     socket.on('map-drawing-live', (data) => {
       const { sessionId, ...rest } = data;
