@@ -10,6 +10,7 @@ import { lerp, clamp } from '../mapConstants';
 export function useLerpAnimation({ refs, drawFrame }) {
   const { lerpAnimRef, tokenLerpsRef, tokenVisualsRef, cursorLerpsRef, cursorVisualsRef, tokenDivsRef, tokensRef } = refs;
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- useCallback à identité stable requis (refs stables via useMapRefs ; effet socket en dépend)
   const startLerpAnimation = useCallback(() => {
     if (lerpAnimRef.current) return;
     const animate = () => {
@@ -42,7 +43,7 @@ export function useLerpAnimation({ refs, drawFrame }) {
       lerpAnimRef.current = active ? requestAnimationFrame(animate) : null;
     };
     lerpAnimRef.current = requestAnimationFrame(animate);
-  }, [drawFrame]);
+  }, [drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs), deps minimales intentionnelles
 
   return startLerpAnimation;
 }

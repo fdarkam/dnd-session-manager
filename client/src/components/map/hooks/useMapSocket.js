@@ -242,5 +242,5 @@ export function useMapSocket({ socket, refs, setters, startLerpAnimation, drawFr
       socket.off('combat-updated', onCombatUpdated);
       socket.off('map-sync', onMapSync);
     };
-  }, [socket, startLerpAnimation, drawFrame]);
+  }, [socket, startLerpAnimation, drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs) ; deps minimales pour identité stable / anti-fuite de listeners
 }

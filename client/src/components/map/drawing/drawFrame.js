@@ -274,7 +274,7 @@ export function useDrawFrame(refs) {
       });
       cCtx.restore();
     }
-  }, []); // ← empty deps: all data comes from refs
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- deps vides intentionnelles : toutes les données viennent des refs
 
   return drawFrame;
 }

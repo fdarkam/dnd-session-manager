@@ -127,7 +127,7 @@ export function useUndoRedo({ refs, setters, drawFrame, socket, sessionId, user 
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [socket, sessionId, drawFrame]);
+  }, [socket, sessionId, drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs), deps minimales intentionnelles
 
   return { saveUndoState };
 }

@@ -51,7 +51,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     const obs = new ResizeObserver(() => drawFrame());
     obs.observe(c);
     return () => obs.disconnect();
-  }, [drawFrame]);
+  }, [drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs), deps minimales intentionnelles
 
   // Redraw on state changes (shapes et selectedShape inclus pour les conditions et formes)
   useEffect(() => { drawFrame(); }, [tokens, paths, shapes, selectedShape, panOffset, zoom, mapImage, imgX, imgY, imgScale, fogCells, gridSize, drawColor, drawWidth, fogColor, fogOpacity, tool, drawFrame]);
@@ -106,7 +106,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     shapesRef.current = shps; setShapes(shps);
     livePathsRef.current = {};
     loadFog(activeMap); loadImgTransform(activeMap);
-  }, [activeMap, drawFrame]);
+  }, [activeMap, drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs) ; rechargement piloté par activeMap uniquement
 
 
   // CRUD maps (fetchMaps + fetchMapsRef + effet initial + uploadMap + delete) extrait dans useMapData
@@ -136,7 +136,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [drawFrame]);
+  }, [drawFrame]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs), deps minimales intentionnelles
 
   // ─── Double-clic : panel d'édition (propriétaire/MJ) ou tooltip créateur ────
   // Utilise l'événement natif dblclick plutôt qu'une détection temporelle dans
@@ -194,7 +194,7 @@ export default function MapCanvas({ sessionId, isDM }) {
     };
     canvas.addEventListener('dblclick', onDblClick);
     return () => canvas.removeEventListener('dblclick', onDblClick);
-  }, [user]); // user.id nécessaire pour la vérification de propriété ; tout le reste vient de refs
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps -- user.id requis pour la vérif de propriété ; refs stables (useMapRefs), deps minimales
 
   const updateToken = (upd) => {
     const next = tokensRef.current.map(t => t.id === upd.id ? upd : t);
@@ -557,6 +557,7 @@ export default function MapCanvas({ sessionId, isDM }) {
       )}
 
       {/* Canvas */}
+      {/* eslint-disable-next-line react-hooks/refs -- getCursor lit resizingToken/isResizingShapeRef (refs stables) en render-only, sans effet de bord */}
       <div ref={containerRef} style={{ flex: 1, minHeight: '400px', position: 'relative', background: '#1c2033', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', cursor: getCursor() }}>
         {/* Map world — <img> DOM visible pour animation GIF native, en dessous du canvas transparent */}
         <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>

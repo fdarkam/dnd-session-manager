@@ -20,7 +20,8 @@ export function useMapData({ refs, setters, socket, sessionId, token, isDM }) {
         setActiveMap(a || null); // null clears map when all maps deleted
       }
     }
-  }, [sessionId, token]);
+  }, [sessionId, token]); // eslint-disable-line react-hooks/exhaustive-deps -- refs stables (useMapRefs), deps minimales intentionnelles
+  // eslint-disable-next-line react-hooks/refs -- fetchMapsRef stable (useMapRefs) ; maj en render lue par l'effet socket onConnect
   fetchMapsRef.current = fetchMaps; // keep ref fresh without adding to socket effect deps
   useEffect(() => { fetchMaps(); }, [fetchMaps]);
 
