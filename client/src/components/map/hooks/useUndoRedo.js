@@ -14,7 +14,7 @@ export function useUndoRedo({ refs, setters, drawFrame, socket, sessionId, user 
   const saveUndoState = () => {
     undoStackRef.current = [
       ...undoStackRef.current.slice(-19),
-      { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) }
+      { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current), shapes: [...shapesRef.current] }
     ];
     redoStackRef.current = [];
   };
@@ -56,13 +56,15 @@ export function useUndoRedo({ refs, setters, drawFrame, socket, sessionId, user 
       if (e.ctrlKey && e.key === 'z') {
         e.preventDefault();
         if (undoStackRef.current.length === 0) return;
-        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) };
+        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current), shapes: [...shapesRef.current] };
         redoStackRef.current = [...redoStackRef.current.slice(-19), current];
         const prev = undoStackRef.current[undoStackRef.current.length - 1];
         undoStackRef.current = undoStackRef.current.slice(0, -1);
         tokensRef.current = prev.tokens; setTokens(prev.tokens);
         pathsRef.current = prev.drawings; setPaths(prev.drawings);
         fogCellsRef.current = prev.fogCells; setFogCells(prev.fogCells);
+        shapesRef.current = prev.shapes; setShapes(prev.shapes);
+        selectedShapeRef.current = null; setSelectedShape(null);
         drawFrame();
         if (socket && activeMapRef.current) {
           socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current.id, allTokens: prev.tokens });
@@ -77,13 +79,15 @@ export function useUndoRedo({ refs, setters, drawFrame, socket, sessionId, user 
       if (e.ctrlKey && e.key === 'y') {
         e.preventDefault();
         if (redoStackRef.current.length === 0) return;
-        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current) };
+        const current = { tokens: [...tokensRef.current], drawings: [...pathsRef.current], fogCells: new Set(fogCellsRef.current), shapes: [...shapesRef.current] };
         undoStackRef.current = [...undoStackRef.current.slice(-19), current];
         const next = redoStackRef.current[redoStackRef.current.length - 1];
         redoStackRef.current = redoStackRef.current.slice(0, -1);
         tokensRef.current = next.tokens; setTokens(next.tokens);
         pathsRef.current = next.drawings; setPaths(next.drawings);
         fogCellsRef.current = next.fogCells; setFogCells(next.fogCells);
+        shapesRef.current = next.shapes; setShapes(next.shapes);
+        selectedShapeRef.current = null; setSelectedShape(null);
         drawFrame();
         if (socket && activeMapRef.current) {
           socket.emit('map-token-add', { sessionId, mapId: activeMapRef.current.id, allTokens: next.tokens });
