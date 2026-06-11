@@ -131,7 +131,10 @@ export function useDrawFrame(refs) {
         tokensRef.current.forEach(tok => {
           if (tok.hidden || tok.type === 'enemy') return;
           const vr = (tok.nightVision ? VISION_ENHANCED : VISION_NORMAL) * gs;
-          ctx.beginPath(); ctx.arc(tok.x, tok.y, vr, 0, Math.PI * 2);
+          // Position interpolée (lerp) plutôt que le snapshot socket → cercle fluide pendant un déplacement distant
+          const vis = tokenVisualsRef.current[tok.id];
+          const tx = vis?.x ?? tok.x, ty = vis?.y ?? tok.y;
+          ctx.beginPath(); ctx.arc(tx, ty, vr, 0, Math.PI * 2);
           ctx.strokeStyle = tok.nightVision ? 'rgba(160,80,255,0.55)' : 'rgba(255,220,80,0.45)';
           ctx.lineWidth = 1.5 / z; ctx.setLineDash([5 / z, 4 / z]); ctx.stroke(); ctx.setLineDash([]);
         });
