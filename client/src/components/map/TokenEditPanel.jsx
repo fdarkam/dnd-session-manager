@@ -8,7 +8,7 @@ const VITE_API = import.meta.env.VITE_API_URL;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 // ─── Token edit panel (draggable) ────────────────────────────────────────────
-function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, onToggleCondition, sessionId }) {
+function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, onToggleCondition, sessionId, linkedCharacterIds = [] }) {
   const { token: authToken, user } = useAuth();
   const canEdit = isDM || !token.createdBy || token.createdBy === user?.id;
   const [name, setName] = useState(token.name || '');
@@ -44,14 +44,15 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
   // Repositionner quand un token différent est ouvert
   useEffect(() => { if (initialPos) setPos(initialPos); }, [token.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Charger les personnages de la session pour le lien token↔combat (MJ uniquement)
+  // Charger les personnages de la session pour le lien token↔combat (MJ ou créateur du token)
+  // Le serveur filtre par rôle : MJ → tous les persos de la session ; joueur → uniquement ses persos assignés
   useEffect(() => {
-    if (!isDM || !sessionId) return;
-    apiGet(`/sessions/${sessionId}/characters`)
+    if (!canEdit || !sessionId) return;
+    apiGet(`/characters/session/${sessionId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setCharacters(Array.isArray(data) ? data : []))
       .catch(() => setCharacters([]));
-  }, [isDM, sessionId, authToken]);
+  }, [canEdit, sessionId, authToken]);
 
   const startDrag = useDraggable(pos, setPos, (rawX, rawY) => ({
     x: Math.max(0, rawX),
@@ -145,8 +146,8 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
             </div>
           </div>
         )}
-        {/* Lien token↔personnage — synchro automatique des statuts de combat (MJ uniquement) */}
-        {isDM && characters.length > 0 && (
+        {/* Lien token↔personnage — synchro automatique des statuts de combat (MJ ou créateur) */}
+        {canEdit && (characters.length > 0 || characterId) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
             <span style={{ fontSize: '11px', color: '#aaa', flexShrink: 0 }}>Perso :</span>
             <select
@@ -159,7 +160,10 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
               style={{ flex: 1, fontSize: '11px', padding: '3px 4px', background: 'var(--bg-tertiary)', border: '1px solid #555', borderRadius: '4px', color: '#fff' }}
             >
               <option value="">— Aucun —</option>
-              {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {/* Exclure les persos déjà liés à un autre token (garder celui lié à ce token) */}
+              {characters
+                .filter(c => c.id === characterId || !linkedCharacterIds.includes(c.id))
+                .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
         )}

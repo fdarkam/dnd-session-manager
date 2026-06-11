@@ -51,6 +51,19 @@ export function setupSocket(io) {
     } catch { return receivedTokens; }
   }
 
+  // Liaison unique token↔personnage : un characterId ne peut exister que sur un seul token.
+  // Garde la première occurrence (token mis à jour / reçu en tête) et vide characterId sur les suivants.
+  // Couvre le cas des tokens cachés qu'un joueur ne renvoie pas dans sa liste partielle.
+  function dedupeCharacterLinks(tokens) {
+    const seen = new Set();
+    return tokens.map(t => {
+      if (!t.characterId) return t;
+      if (seen.has(t.characterId)) return { ...t, characterId: null };
+      seen.add(t.characterId);
+      return t;
+    });
+  }
+
   function broadcastTokens(sessionId, mapId, allTokens, live, excludeSocketId) {
     const room = io.sockets.adapter.rooms.get(sessionId);
     if (!room) return;
@@ -248,6 +261,8 @@ export function setupSocket(io) {
       }
 
       if (!live) {
+        // Liaison unique garantie en DB (couvre les tokens cachés non renvoyés par un joueur)
+        finalTokens = dedupeCharacterLinks(finalTokens);
         try { db.prepare('UPDATE maps SET tokens = ? WHERE id = ?').run(JSON.stringify(finalTokens), mapId); }
         catch (err) { console.error('DB token-move write error:', err); }
       }

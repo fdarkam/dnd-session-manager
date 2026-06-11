@@ -198,7 +198,9 @@ export default function MapCanvas({ sessionId, isDM }) {
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps -- user.id requis pour la vérif de propriété ; refs stables (useMapRefs), deps minimales
 
   const updateToken = (upd) => {
-    const next = tokensRef.current.map(t => t.id === upd.id ? upd : t);
+    let next = tokensRef.current.map(t => t.id === upd.id ? upd : t);
+    // Liaison unique : un personnage ne peut être lié qu'à un seul token → retirer le lien des autres tokens
+    if (upd.characterId) next = next.map(t => (t.id !== upd.id && t.characterId === upd.characterId) ? { ...t, characterId: null } : t);
     tokensRef.current = next; setTokens(next); selectedTokenRef.current = upd; setSelectedToken(upd); drawFrame();
     if (socket) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: next, live: false });
   };
@@ -410,7 +412,7 @@ export default function MapCanvas({ sessionId, isDM }) {
         )}
         {showDice && <FloatingPanel title="🎲 Dés" defaultPos={{ x: 16, y: 16 }} defaultSize={{ w: 300, h: 480 }} onClose={() => setShowDice(false)}><DiceRoller sessionId={sessionId} /></FloatingPanel>}
         {showCombat && <FloatingPanel title="⚔️ Combat" defaultPos={{ x: 16, y: showDice ? 450 : 16 }} defaultSize={{ w: 340, h: 540 }} onClose={() => setShowCombat(false)}><CombatTracker sessionId={sessionId} isDM={isDM} /></FloatingPanel>}
-        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} sessionId={sessionId} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} onToggleCondition={toggleCondition} />}
+        {selectedToken && showTokenEdit && <TokenEditPanel token={selectedToken} isDM={isDM} sessionId={sessionId} linkedCharacterIds={tokens.filter(t => t.id !== selectedToken.id && t.characterId).map(t => t.characterId)} onUpdate={updateToken} onDelete={() => setPendingDelete({ type: 'token', id: selectedToken.id, name: selectedToken.name })} onClose={() => { setSelectedToken(null); selectedTokenRef.current = null; setShowTokenEdit(false); drawFrame(); }} initialPos={tokenEditPos} onToggleCondition={toggleCondition} />}
       </div>
     </div>
   );
