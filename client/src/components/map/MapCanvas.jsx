@@ -250,6 +250,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   const deleteSelectedShape = () => {
     const shape = selectedShapeRef.current;
     if (!shape) return;
+    saveUndoState();
     const next = shapesRef.current.filter(s => s.id !== shape.id);
     shapesRef.current = next; setShapes(next);
     selectedShapeRef.current = null; setSelectedShape(null);

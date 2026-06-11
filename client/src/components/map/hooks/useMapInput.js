@@ -137,6 +137,7 @@ export function useMapInput({ refs, state, setters, socket, sessionId, isDM, use
       if (selShape) {
         const clickedHandle = getClickedHandle(selShape, pos, 10 / zoomRef.current);
         if (clickedHandle) {
+          saveUndoState();
           activeHandleRef.current = clickedHandle;
           isResizingShapeRef.current = true;
           return;
@@ -169,6 +170,7 @@ export function useMapInput({ refs, state, setters, socket, sessionId, isDM, use
         selectedShapeRef.current = clickedShape; setSelectedShape(clickedShape);
         selectedTokenRef.current = null; setSelectedToken(null); setShowTokenEdit(false);
         // Fix 2 — démarrer le drag de la forme sélectionnée
+        saveUndoState();
         isDraggingShapeRef.current = { shape: clickedShape, startX: pos.x, startY: pos.y, origX: clickedShape.x, origY: clickedShape.y, origX2: clickedShape.x2, origY2: clickedShape.y2 };
         drawFrame(); return;
       }
@@ -355,6 +357,7 @@ export function useMapInput({ refs, state, setters, socket, sessionId, isDM, use
       const shape = currentShapeRef.current;
       const sizeSq = (shape.x2 - shape.x) ** 2 + (shape.y2 - shape.y) ** 2;
       if (sizeSq > 25) { // ignorer les formes trop petites (clic accidentel)
+        saveUndoState();
         const next = [...shapesRef.current, shape];
         shapesRef.current = next; setShapes(next);
         if (socket && activeMapRef.current)

@@ -120,6 +120,7 @@ export function useUndoRedo({ refs, setters, drawFrame, socket, sessionId, user 
         const shape = selectedShapeRef.current;
         if (isDMRef.current || shape.createdBy === user?.id) {
           e.preventDefault();
+          saveUndoState();
           const next = shapesRef.current.filter(s => s.id !== shape.id);
           shapesRef.current = next; setShapes(next);
           selectedShapeRef.current = null; setSelectedShape(null);
