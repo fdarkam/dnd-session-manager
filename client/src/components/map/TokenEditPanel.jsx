@@ -171,7 +171,9 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
 
         {/* Section Conditions — accessible à tous (MJ et joueur propriétaire) */}
         <div style={{ borderTop: '1px solid #333', paddingTop: '6px', marginTop: '2px' }}>
-          <span style={{ fontSize: '0.72rem', color: '#aaa', display: 'block', marginBottom: '4px' }}>Conditions</span>
+          <span style={{ fontSize: '0.72rem', color: '#aaa', display: 'block', marginBottom: '4px' }}>
+            Conditions{token.characterId && <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem' }}> — gérées par le combat</span>}
+          </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
             {CONDITIONS.map(condition => {
               const active = token.conditions?.includes(condition.id);
@@ -179,12 +181,13 @@ function TokenEditPanel({ token, onUpdate, onDelete, onClose, isDM, initialPos, 
                 <button
                   key={condition.id}
                   onClick={() => onToggleCondition(token.id, condition.id)}
-                  title={condition.label}
+                  disabled={!!token.characterId}
+                  title={token.characterId ? 'Statut géré par le combat' : condition.label}
                   style={{
                     padding: '2px 5px', fontSize: '13px', borderRadius: '4px',
                     border: `1px solid ${active ? condition.color : '#555'}`,
                     background: active ? condition.color : 'transparent',
-                    cursor: 'pointer', opacity: active ? 1 : 0.35,
+                    cursor: token.characterId ? 'not-allowed' : 'pointer', opacity: active ? 1 : 0.35,
                     transition: 'opacity 0.15s, background 0.15s',
                   }}
                 >

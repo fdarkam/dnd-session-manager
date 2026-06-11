@@ -509,7 +509,8 @@ export function setupSocket(io) {
           db.prepare('UPDATE combat_encounters SET entities = ?, current_turn = ?, round = ? WHERE id = ?')
             .run(JSON.stringify(encounter.entities), encounter.current_turn, encounter.round, encounter.id);
       } catch {}
-      socket.to(sessionId).emit('combat-updated', encounter);
+      // io.to (et non socket.to) : inclut l'émetteur — sa propre map (CombatTracker embarqué) doit aussi se synchroniser
+      io.to(sessionId).emit('combat-updated', encounter);
     });
 
     socket.on('combat-next-turn', (data) => {

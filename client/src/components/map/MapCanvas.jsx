@@ -229,6 +229,8 @@ export default function MapCanvas({ sessionId, isDM }) {
   const toggleCondition = (tokenId, conditionId) => {
     const tok = tokensRef.current.find(t => t.id === tokenId);
     if (!tok) return;
+    // Token lié à un personnage : les statuts sont pilotés par le CombatTracker → conditions manuelles ignorées
+    if (tok.characterId) return;
     const conditions = tok.conditions || [];
     const next = conditions.includes(conditionId)
       ? conditions.filter(c => c !== conditionId)

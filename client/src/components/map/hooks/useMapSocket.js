@@ -176,7 +176,8 @@ export function useMapSocket({ socket, refs, setters, startLerpAnimation, drawFr
       drawFrame();
     };
     // Synchro des statuts de combat vers les conditions du token lié par characterId
-    const onCombatUpdated = ({ encounter }) => {
+    // Le serveur émet l'objet encounter brut (pas enveloppé) — même payload que CombatTracker
+    const onCombatUpdated = (encounter) => {
       if (!encounter?.entities) return;
       let changed = false;
       const updated = tokensRef.current.map(tok => {
