@@ -172,6 +172,9 @@ export function useDrawFrame(refs) {
     if (!dm && gs > 0) {
       tokensRef.current.forEach(tok => {
         if (tok.hidden || tok.visionRadius === 0) return;
+        // Token dans le fog : ne pas trahir sa position via le dégradé (même test fog que l'overlay HTML)
+        const cellKey = `${Math.floor(tok.x / gs)},${Math.floor(tok.y / gs)}`;
+        if (fc.has(cellKey)) return;
         const vr = (tok.visionRadius === 'enhanced' || (tok.visionRadius === undefined && tok.nightVision))
           ? VISION_ENHANCED * gs
           : VISION_NORMAL * gs;
