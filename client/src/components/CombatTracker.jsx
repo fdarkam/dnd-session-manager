@@ -2,29 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import { apiGet, apiPost, apiPut } from '../api/client';
-
-const ALL_STATUSES = [
-  'Empoisonné', 'Étourdi', 'Concentré', 'Charmé', 'Effrayé',
-  'Paralysé', 'Aveuglé', 'Sourd', 'Invisible', 'Prone',
-  'Entravé', 'Épuisé', 'Pétrifié', 'Inconscient',
-];
-
-const STATUS_STYLE = {
-  'Empoisonné':  { bg: 'rgba(34,197,94,0.15)',   color: '#22c55e' },
-  'Étourdi':     { bg: 'rgba(234,179,8,0.15)',    color: '#eab308' },
-  'Concentré':   { bg: 'rgba(59,130,246,0.15)',   color: '#60a5fa' },
-  'Charmé':      { bg: 'rgba(236,72,153,0.15)',   color: '#f472b6' },
-  'Effrayé':     { bg: 'rgba(249,115,22,0.15)',   color: '#fb923c' },
-  'Paralysé':    { bg: 'rgba(168,85,247,0.15)',   color: '#c084fc' },
-  'Aveuglé':     { bg: 'rgba(107,114,128,0.15)',  color: '#9ca3af' },
-  'Sourd':       { bg: 'rgba(107,114,128,0.15)',  color: '#9ca3af' },
-  'Invisible':   { bg: 'rgba(139,92,246,0.12)',   color: '#a78bfa' },
-  'Prone':       { bg: 'rgba(146,64,14,0.15)',    color: '#d97706' },
-  'Entravé':     { bg: 'rgba(220,38,38,0.15)',    color: '#f87171' },
-  'Épuisé':      { bg: 'rgba(120,113,108,0.15)',  color: '#a8a29e' },
-  'Pétrifié':    { bg: 'rgba(55,65,81,0.2)',      color: '#9ca3af' },
-  'Inconscient': { bg: 'rgba(15,23,42,0.4)',      color: '#94a3b8' },
-};
+import { CONDITIONS } from '../domain/conditions';
 
 export default function CombatTracker({ sessionId, isDM }) {
   const socket = useSocket();
@@ -660,19 +638,22 @@ export default function CombatTracker({ sessionId, isDM }) {
                 {statuses.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
                     {statuses.map(s => {
-                      const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
+                      // s = id EN (domain/conditions) ; fallback sur la valeur brute pour d'éventuels statuts legacy
+                      const cond = CONDITIONS.find(c => c.id === s);
+                      const label = cond?.label || s;
+                      const color = cond?.color || '#c9a84c';
                       return (
                         <span
                           key={s}
                           onClick={() => toggleStatus(entity.id, s)}
-                          title={`Retirer : ${s}`}
+                          title={`Retirer : ${label}`}
                           style={{
                             fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, cursor: 'pointer',
-                            background: sc.bg, color: sc.color, border: `1px solid ${sc.color}44`,
+                            background: `${color}26`, color, border: `1px solid ${color}44`,
                             userSelect: 'none',
                           }}
                         >
-                          {s} ✕
+                          {label} ✕
                         </span>
                       );
                     })}
@@ -707,23 +688,22 @@ export default function CombatTracker({ sessionId, isDM }) {
             boxShadow: 'var(--shadow-md)',
           }}
         >
-          {ALL_STATUSES.map(s => {
-            const active = (encounter.entities.find(e => e.id === statusOpen)?.statuses || []).includes(s);
-            const sc = STATUS_STYLE[s] || { bg: 'rgba(201,168,76,0.15)', color: '#c9a84c' };
+          {CONDITIONS.map(cond => {
+            const active = (encounter.entities.find(e => e.id === statusOpen)?.statuses || []).includes(cond.id);
             return (
               <span
-                key={s}
-                onClick={() => toggleStatus(statusOpen, s)}
+                key={cond.id}
+                onClick={() => toggleStatus(statusOpen, cond.id)}
                 style={{
                   fontSize: '0.65rem', padding: '3px 7px', borderRadius: 8, cursor: 'pointer',
-                  background: active ? sc.bg : 'var(--bg-tertiary)',
-                  color: active ? sc.color : 'var(--text-muted)',
-                  border: `1px solid ${active ? sc.color + '55' : 'var(--border-color)'}`,
+                  background: active ? `${cond.color}26` : 'var(--bg-tertiary)',
+                  color: active ? cond.color : 'var(--text-muted)',
+                  border: `1px solid ${active ? cond.color + '55' : 'var(--border-color)'}`,
                   userSelect: 'none',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {active ? '✓ ' : ''}{s}
+                {active ? '✓ ' : ''}{cond.label}
               </span>
             );
           })}
