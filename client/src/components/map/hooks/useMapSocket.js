@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 // ─── Socket listeners ─────────────────────────────────────────────────────
 // Effet socket entier copié VERBATIM depuis MapCanvas : 25 on/off, handlers,
 // hasConnectedRef local, deps [socket, startLerpAnimation, drawFrame] à l'identique.
-export function useMapSocket({ socket, refs, setters, startLerpAnimation, drawFrame, loadFog, loadImgTransform }) {
+export function useMapSocket({ socket, refs, setters, startLerpAnimation, drawFrame, loadFog, loadImgTransform, sessionId, isDM }) {
   const { pingAnimRef, fetchMapsRef, tokensRef, tokenVisualsRef, tokenLerpsRef, cursorVisualsRef, cursorLerpsRef, pathsRef, livePathsRef, mapImageRef, imgXRef, imgYRef, imgScaleRef, gridSizeRef, fogCellsRef, activeMapRef, otherCursorsRef, shapesRef, selectedShapeRef } = refs;
   const { setMaps, setActiveMap, setMapImage, setImgX, setImgY, setImgScale, setTokens, setPaths, setFogCells, setGridSize, setShapes, setSelectedShape } = setters;
 
@@ -184,13 +184,22 @@ export function useMapSocket({ socket, refs, setters, startLerpAnimation, drawFr
         if (!tok.characterId) return tok;
         const entity = encounter.entities.find(e => e.characterId === tok.characterId);
         if (!entity?.statuses) return tok;
+        // Ne marquer changed que si les conditions diffèrent réellement —
+        // évite re-render + écriture DB à chaque combat-updated (ex. simple changement de HP).
+        const cur = tok.conditions || [];
+        const next = entity.statuses;
+        if (cur.length === next.length && cur.every(c => next.includes(c))) return tok;
         changed = true;
-        return { ...tok, conditions: entity.statuses };
+        return { ...tok, conditions: next };
       });
       if (!changed) return;
       tokensRef.current = updated;
       setTokens(updated);
       drawFrame();
+      // Persistance DB : seul le MJ persiste (autorité combat + liste complète des tokens, cachés inclus,
+      // donc pas de mergeWithHidden côté serveur). Sans ça, le prochain map-token-update (déplacement)
+      // renverrait les tokens depuis la DB sans les conditions → statuts effacés au moindre déplacement.
+      if (isDM) socket.emit('map-token-move', { sessionId, mapId: activeMapRef.current?.id, tokens: updated, live: false });
     };
 
     socket.on('map-token-update', onTokenUpdate);

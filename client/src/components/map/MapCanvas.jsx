@@ -70,7 +70,7 @@ export default function MapCanvas({ sessionId, isDM }) {
   };
 
   // ─── Socket listeners → extraits dans useMapSocket ───
-  useMapSocket({ socket, refs, setters, startLerpAnimation, drawFrame, loadFog, loadImgTransform });
+  useMapSocket({ socket, refs, setters, startLerpAnimation, drawFrame, loadFog, loadImgTransform, sessionId, isDM });
 
   // Load map when active changes — guard against spurious re-runs (ex: rename)
   useEffect(() => {
