@@ -1,138 +1,128 @@
 # 🐉 DND Session Manager
 
-Application Full Stack de gestion de campagnes et de sessions de jeu de rôle **Donjons & Dragons (D&D)** en temps réel.
+Application Full Stack de gestion de campagnes **Donjons & Dragons** avec Virtual Tabletop (VTT) temps réel.
 
-DND Session Manager permet aux Maîtres du Jeu (MJ) et aux joueurs de centraliser l'ensemble des outils nécessaires au déroulement d'une campagne : fiches de personnages, cartes interactives, suivi des combats, chat temps réel, wiki collaboratif, quêtes, lancers de dés et journal d'actions.
-
----
-
-# ✨ Fonctionnalités principales
-
-## 🔐 Authentification et gestion des utilisateurs
-
-* Inscription et connexion sécurisées
-* Authentification JWT
-* Mots de passe chiffrés avec bcrypt
-* Modification du profil utilisateur
-* Gestion des avatars
-* Mise à jour des pseudonymes en temps réel
+Le projet permet à un Maître du Jeu (MJ) et à ses joueurs de gérer une campagne complète depuis une interface unique : cartes interactives, combats, fiches de personnages, quêtes, wiki collaboratif, chat temps réel et lancers de dés.
 
 ---
 
-## 🎲 Gestion des sessions
+# ✨ Fonctionnalités
 
-### Maître du Jeu
+## 🗺️ Virtual Tabletop (VTT)
 
-* Création de campagnes
-* Génération automatique de codes d'invitation
-* Suppression de campagnes
-* Gestion des membres
+Le cœur de l'application repose sur un système de carte temps réel synchronisé via Socket.IO.
 
-### Joueurs
+### Fonctionnalités disponibles
 
-* Rejoindre une campagne via un code d'invitation
-* Consultation des sessions auxquelles ils participent
-* Présence en ligne en temps réel
-
----
-
-## 📜 Fiches de personnages
-
-Gestion complète des personnages :
-
-* Nom
-* Race
-* Classe
-* Niveau
-* Points de vie
-* Classe d'armure
-* Initiative
-* Bonus d'attaque
-* Caractéristiques :
-
-  * Force
-  * Dextérité
-  * Constitution
-  * Intelligence
-  * Sagesse
-  * Charisme
-
-Fonctionnalités avancées :
-
-* Attribution d'un personnage à un joueur
-* Synchronisation en temps réel
-* Sauvegarde automatique
-* Gestion de l'inventaire
-* Gestion des compétences
-* Gestion des capacités
-* Historique et notes
-* Import de fiches via PDF
-* Transfert de personnages entre campagnes
-
----
-
-## 🗺️ Carte interactive (Virtual Tabletop)
-
-Système de carte temps réel intégré.
-
-### Fonctionnalités
-
-* Import d'images de cartes
+* Import et affichage de cartes
 * Déplacement de tokens en temps réel
-* Synchronisation multi-utilisateurs
-* Dessin collaboratif
-* Curseurs visibles des autres joueurs
+* Interpolation fluide (lerp)
+* Grille de jeu configurable
 * Brouillard de guerre (Fog of War)
 * Vision automatique des personnages
-* Vision améliorée (Night Vision)
-* Gestion des couches de dessin
-* Mise à jour instantanée via Socket.IO
+* Dessin libre
+* Outil gomme
+* Formes tactiques :
+
+  * Cercle
+  * Rectangle
+  * Ligne
+  * Cône
+* Synchronisation multi-utilisateurs
+* Mise à jour temps réel des positions
 
 ---
 
-## ⚔️ Gestionnaire de combat
+## 🎭 Gestion des tokens
 
-Outil dédié aux affrontements.
+Chaque token peut être lié à un personnage de campagne.
+
+### Données gérées
+
+* Nom
+* Position
+* Points de vie
+* Apparence
+* Conditions D&D
+* Vision
+* Liaison avec une fiche de personnage
+
+### Conditions D&D supportées
+
+* Aveuglé
+* Charmé
+* Assourdi
+* Effrayé
+* Agrippé
+* Incapacités
+* Invisible
+* Paralysé
+* Pétrifié
+* Empoisonné
+* À terre
+* Étourdi
+
+Les conditions sont centralisées dans :
+
+```text
+src/domain/conditions.js
+```
+
+Chaque condition possède :
+
+* un identifiant technique
+* un libellé français
+* un emoji
+* une couleur associée
+
+---
+
+## ⚔️ Combat Tracker
+
+Gestion complète des combats.
 
 ### Fonctionnalités
 
-* Création d'initiatives
-
-* Gestion des tours
-
+* Initiative
+* Ordre des tours
 * Gestion des rounds
-
-* Ordre automatique des participants
-
-* Gestion des monstres et PNJ
-
 * Suivi des points de vie
-
-* Conditions et états :
-
-  * Empoisonné
-  * Étourdi
-  * Concentré
-  * Charmé
-  * Effrayé
-  * Paralysé
-  * Aveuglé
-  * Sourd
-  * Invisible
-  * Entravé
-  * Épuisé
-  * Pétrifié
-  * Inconscient
-
-* Synchronisation temps réel pour tous les participants
+* Conditions actives
+* Synchronisation temps réel
+* Mise à jour instantanée pour tous les joueurs
 
 ---
 
-## 🎲 Lanceur de dés
+## 📜 Fiches de personnage
 
-Support des expressions classiques D&D :
+Gestion complète des personnages D&D.
 
-Exemples :
+### Caractéristiques
+
+* Force
+* Dextérité
+* Constitution
+* Intelligence
+* Sagesse
+* Charisme
+
+### Fonctionnalités
+
+* Création
+* Modification
+* Attribution à un joueur
+* Liaison avec un token
+* Export JSON
+* Import JSON
+* Import PDF
+
+---
+
+## 🎲 Lancers de dés
+
+Support des expressions classiques de Donjons & Dragons.
+
+### Exemples
 
 ```text
 1d20
@@ -141,75 +131,58 @@ Exemples :
 1d100
 ```
 
-Fonctionnalités :
+### Fonctionnalités
 
 * Historique des jets
 * Résultats détaillés
-* Calcul automatique des totaux
-* Diffusion en temps réel
-* Effets sonores
+* Diffusion temps réel
+* Intégration au journal d'actions
 
 ---
 
 ## 💬 Chat temps réel
 
-Messagerie intégrée à chaque campagne.
+Messagerie intégrée à chaque session.
 
 ### Fonctionnalités
 
-* Messages publics
-* Messages privés
+* Messages instantanés
+* Synchronisation Socket.IO
 * Historique persistant
 * Affichage des utilisateurs connectés
-* Commandes liées aux jets de dés
-* Synchronisation Socket.IO
-
-### Permissions
-
-* Le MJ peut consulter tous les messages.
-* Les joueurs ne voient que :
-
-  * les messages publics ;
-  * les messages privés qu'ils envoient ;
-  * les messages privés qui leur sont destinés.
 
 ---
 
 ## 📖 Wiki collaboratif
 
-Base de connaissances intégrée à la campagne.
+Documentation partagée de la campagne.
 
-### Catégories disponibles
+### Utilisation
 
-* Général
-* Monde
-* PNJs
-* Lieux
 * Lore
+* PNJ
+* Lieux
+* Factions
+* Notes de campagne
 
 ### Fonctionnalités
 
-* Création de pages
-* Modification en temps réel
-* Suppression
-* Organisation par catégories
-* Partage d'informations de campagne
+* Création
+* Modification
+* Consultation collaborative
 
 ---
 
-## 📌 Gestion des quêtes
+## 📌 Gestionnaire de quêtes
 
-Suivi de l'avancement de l'aventure.
+Suivi des objectifs de campagne.
 
 ### Fonctionnalités
 
 * Création de quêtes
 * Modification
-* Suppression
-* Filtrage par statut
-* Quêtes publiques
-* Quêtes privées
 * Suivi de progression
+* Historique
 
 ---
 
@@ -217,55 +190,268 @@ Suivi de l'avancement de l'aventure.
 
 Historique centralisé des événements importants :
 
-* Création de personnages
-* Modifications
 * Lancers de dés
-* Gestion de combat
-* Activités de session
-* Événements système
+* Combats
+* Modifications de personnages
+* Gestion des cartes
+* Actions de session
 
 ---
 
-## 🔔 Notifications temps réel
+## 🔐 Authentification
 
-* Événements de session
-* Assignation de personnages
-* Jets de dés
-* Actions importantes
-* Effets sonores intégrés
+Authentification sécurisée basée sur JWT.
+
+### Fonctionnalités
+
+* Inscription
+* Connexion
+* Gestion de session
+* Sessions multiples
+* Persistance utilisateur
 
 ---
 
-# 🏗️ Architecture du projet
+## 👑 Gestion des rôles
+
+Deux rôles principaux sont disponibles :
+
+### Maître du Jeu
+
+* Gestion complète de la session
+* Contrôle de la carte
+* Gestion des combats
+* Gestion des personnages
+* Administration des contenus
+
+### Joueur
+
+* Accès limité selon les permissions accordées
+* Contrôle de son personnage
+* Participation aux combats
+* Interaction avec les outils de session
+
+---
+
+# 🏗️ Architecture Frontend
 
 ```text
-DnD/
+client/src/
+├── api/
+│   └── client.js
 │
-├── client/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── contexts/
-│   │   ├── pages/
-│   │   ├── hooks/
-│   │   └── utils/
+├── domain/
+│   └── conditions.js
+│
+├── hooks/
+│   └── useDraggable.js
+│
+├── components/
+│   ├── common/
+│   │   └── FloatingPanel.jsx
 │   │
-│   └── public/
+│   ├── map/
+│   │   ├── MapCanvas.jsx
+│   │   ├── MapToolbar.jsx
+│   │   ├── TokenOverlay.jsx
+│   │   ├── TokenEditPanel.jsx
+│   │   ├── TokenInfoPanel.jsx
+│   │   ├── geometry.js
+│   │   │
+│   │   ├── drawing/
+│   │   │   ├── drawFrame.js
+│   │   │   └── drawShape.js
+│   │   │
+│   │   └── hooks/
+│   │       ├── useMapRefs.js
+│   │       ├── useMapSocket.js
+│   │       ├── useMapInput.js
+│   │       ├── useLerpAnimation.js
+│   │       ├── useFog.js
+│   │       ├── useUndoRedo.js
+│   │       └── useMapData.js
+│   │
+│   ├── CharacterSheet.jsx
+│   ├── CombatTracker.jsx
+│   ├── ChatPanel.jsx
+│   ├── DiceRoller.jsx
+│   ├── QuestTracker.jsx
+│   ├── WikiPanel.jsx
+│   ├── ActionLog.jsx
+│   └── Notifications.jsx
 │
-└── server/
-    ├── routes/
-    ├── middleware/
-    ├── socket/
-    ├── uploads/
-    └── db.js
+├── contexts/
+│   ├── AuthContext.jsx
+│   └── SocketContext.jsx
+│
+└── pages/
+    ├── SessionPage.jsx
+    ├── DashboardPage.jsx
+    └── LoginPage.jsx
 ```
 
 ---
 
-# 🛠️ Technologies utilisées
+# ⚡ Architecture VTT
+
+## MapCanvas
+
+`MapCanvas` agit comme orchestrateur principal.
+
+Responsabilités :
+
+* Gestion du rendu
+* Coordination des hooks spécialisés
+* Synchronisation des données de carte
+* Communication avec le moteur de dessin
+
+---
+
+## useMapRefs
+
+Hook central du moteur temps réel.
+
+### Responsabilités
+
+* Stockage des références critiques
+* Synchronisation état ↔ références
+* Support du rendu 60 FPS
+* Évitement des re-renders inutiles
+
+---
+
+## useMapInput
+
+Gestion des interactions utilisateur :
+
+* souris
+* drag & drop
+* zoom
+* pan
+* dessin
+
+Conçu pour le chemin critique d'exécution temps réel.
+
+---
+
+## useMapSocket
+
+Gestion de la synchronisation réseau.
+
+Responsabilités :
+
+* Enregistrement des événements Socket.IO
+* Réception des mises à jour
+* Diffusion des actions utilisateur
+
+---
+
+## useLerpAnimation
+
+Interpolation des déplacements.
+
+Permet :
+
+* mouvements fluides
+* réduction des saccades réseau
+* meilleure perception des déplacements
+
+---
+
+## useFog
+
+Gestion :
+
+* du brouillard de guerre
+* des zones visibles
+* de la vision automatique
+
+---
+
+## useUndoRedo
+
+Historique local des actions :
+
+* annulation
+* restauration
+
+---
+
+# 🔒 Invariants techniques
+
+## Pattern Ref / State miroir
+
+Le moteur de carte repose sur un système de synchronisation entre états React et références.
+
+Objectifs :
+
+* stabilité du rendu
+* suppression des ralentissements
+* compatibilité temps réel
+
+Cet invariant doit être conservé.
+
+---
+
+## drawFrame
+
+Le moteur de rendu suit une règle stricte :
+
+```text
+drawFrame
+    ↓
+lecture des refs uniquement
+    ↓
+aucune lecture directe des states React
+```
+
+Cette contrainte garantit des performances constantes lors du rendu.
+
+---
+
+## Socket.IO
+
+Les listeners de `useMapSocket` sont appairés :
+
+```javascript
+socket.on(event, handler);
+
+// cleanup
+
+socket.off(event, handler);
+```
+
+Toute modification doit préserver cet équilibre afin d'éviter :
+
+* fuites mémoire
+* doublons d'événements
+* désynchronisations
+
+---
+
+## API Client
+
+Toutes les communications HTTP transitent exclusivement par :
+
+```text
+src/api/client.js
+```
+
+Aucun appel réseau direct ne doit être effectué depuis les composants.
+
+Cette couche centralise :
+
+* l'authentification JWT
+* la gestion des erreurs
+* les appels backend
+
+---
+
+# 🛠️ Technologies
 
 ## Frontend
 
-* React 19
+* React
 * Vite
 * Socket.IO Client
 * JavaScript ES Modules
@@ -275,157 +461,52 @@ DnD/
 * Node.js
 * Express
 * Socket.IO
-* JWT
-* bcryptjs
 
 ## Base de données
 
 * SQLite
 * better-sqlite3
 
-## Uploads et fichiers
+## Authentification
 
-* Multer
-* PDF Parse
-
----
-
-# 🗄️ Base de données
-
-Principales tables :
-
-* users
-* sessions
-* session_members
-* characters
-* dice_rolls
-* chat_messages
-* maps
-* combat_encounters
-* quests
-* wiki_pages
-* action_logs
+* JWT
 
 ---
 
-# 🚀 Installation
+# 🚀 Lancement du projet
 
-## 1. Cloner le projet
+## Installation des dépendances
 
 ```bash
-git clone <repository-url>
-cd DnD
-```
-
----
-
-## 2. Installer le client
-
-```bash
-cd client
 npm install
 ```
 
----
-
-## 3. Installer le serveur
+## Frontend
 
 ```bash
-cd ../server
-npm install
-```
-
----
-
-## 4. Configuration
-
-### Client (.env)
-
-```env
-VITE_API_URL=http://localhost:3000/api
-VITE_SOCKET_URL=http://localhost:3000
-```
-
-### Serveur (.env)
-
-```env
-JWT_SECRET=your_secret_key
-PORT=3000
-```
-
----
-
-## 5. Lancer le serveur
-
-```bash
-cd server
 npm run dev
 ```
 
-ou
+## Backend
 
 ```bash
 npm start
 ```
-
----
-
-## 6. Lancer le client
-
+ou
 ```bash
-cd client
 npm run dev
 ```
-
 ---
 
-# 🔌 Temps réel
+# 🎯 Objectif du projet
 
-La communication temps réel repose sur Socket.IO.
+DND Session Manager vise à fournir une plateforme unifiée permettant de gérer l'intégralité d'une campagne de jeu de rôle :
 
-Événements principaux :
+* cartes tactiques temps réel ;
+* combats ;
+* personnages ;
+* documentation ;
+* communication ;
+* suivi de progression.
 
-* connexion utilisateur
-* présence en ligne
-* messages de chat
-* lancers de dés
-* mises à jour des personnages
-* mouvements de tokens
-* dessins collaboratifs
-* wiki
-* notifications
-* gestion des combats
-
----
-
-# 🔒 Sécurité
-
-* Authentification JWT
-* Routes protégées
-* Vérification des rôles
-* Hashage des mots de passe avec bcrypt
-* Validation des accès aux campagnes
-* Isolation des données par session
-
----
-
-# 📈 Objectifs du projet
-
-DND Session Manager vise à fournir une plateforme légère et temps réel permettant à un groupe de joueurs de gérer l'ensemble d'une campagne de jeu de rôle sans dépendre de multiples outils externes.
-
-L'application centralise :
-
-* la préparation des campagnes ;
-* la gestion des personnages ;
-* les combats ;
-* les cartes ;
-* la documentation ;
-* la communication entre joueurs.
-
----
-
-# 📄 Licence
-
-Projet réalisé à des fins pédagogiques et de développement logiciel.
-
-Licence à définir selon les besoins du projet.
+L'application met l'accent sur la fluidité du Virtual Tabletop, la synchronisation temps réel et la centralisation des outils utilisés lors d'une partie de Donjons & Dragons.
